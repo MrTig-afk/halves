@@ -2,9 +2,11 @@
 // The cookie holds only "<session uuid>.<HMAC>", so a guessed or edited value is refused before
 // the database is asked, and signing out deletes the row, so a copied cookie stops working.
 import { createHmac, timingSafeEqual } from "node:crypto";
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
+import { redirect } from "next/navigation";
 import { cache } from "react";
 import { query } from "./db";
+import { PATH_HEADER, signInPath } from "./paths";
 
 export const SESSION_COOKIE = "halves_session";
 // A device stays signed in until Sign out; 400 days is the longest lifetime browsers accept.
@@ -61,4 +63,13 @@ export async function endSession(): Promise<void> {
   const id = readSessionId(store.get(SESSION_COOKIE)?.value);
   if (id) await query("delete from device_session where id = $1", [id]);
   store.delete(SESSION_COOKIE);
+}
+
+// The one sign-in check every signed-in screen uses. A signed-out (or stale-cookie) request goes
+// to the tiles, carrying the deep link the proxy recorded, so after the PIN the person lands on
+// the bill or round they opened - on a first load and on an in-app navigation alike.
+export async function requirePerson(): Promise<Person> {
+  const me = await currentPerson();
+  if (!me) redirect(signInPath((await headers()).get(PATH_HEADER)));
+  return me;
 }

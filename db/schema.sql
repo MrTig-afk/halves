@@ -91,6 +91,20 @@ CREATE TABLE IF NOT EXISTS receipt_photo (
   created_at   timestamptz NOT NULL DEFAULT now()
 );
 
+-- A bill is settled once and stays settled: settlement_id may go from null to a round, never
+-- back to null and never to another round. The grants below allow updating the column at all;
+-- this is what makes that update one-way.
+CREATE OR REPLACE FUNCTION bill_settle_once() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  IF OLD.settlement_id IS NOT NULL AND NEW.settlement_id IS DISTINCT FROM OLD.settlement_id THEN
+    RAISE EXCEPTION 'bill % is already settled', OLD.id;
+  END IF;
+  RETURN NEW;
+END $$;
+DROP TRIGGER IF EXISTS bill_settle_once ON bill;
+CREATE TRIGGER bill_settle_once BEFORE UPDATE OF settlement_id ON bill
+  FOR EACH ROW EXECUTE FUNCTION bill_settle_once();
+
 -- The app role (created once at setup, no DDL rights) gets exactly what the PRD allows.
 -- Saved bills are immutable: bills only gain a settlement or an archived
 -- photo; line items and settlements are insert-only. Everything is revoked first so

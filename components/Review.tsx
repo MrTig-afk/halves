@@ -10,6 +10,7 @@ import { clock, postBill, type VoiceResult } from "@/lib/api";
 import type { ReceiptReading } from "@/lib/receipt";
 import { MAX_BILL_CENTS } from "@/lib/bill";
 import { formatCents, parseCents } from "@/lib/money";
+import { firstName as first, initial } from "@/lib/names";
 import type { LineKind } from "@/lib/receipt";
 import { partnerOwes, type Share } from "@/lib/split";
 
@@ -28,8 +29,6 @@ export type SavedBill = { description: string; partnerName: string; owes: number
 
 const ORDER: Share[] = ["payer", "split", "partner"];
 type Snapshot = { shares: Map<number, Share>; partnerId: number | null }; // what a voice change replaced
-const first = (name: string) => name.trim().split(/\s+/)[0] ?? name;
-const initial = (name: string) => name.trim().charAt(0).toUpperCase();
 let nextKey = 1_000_000;
 
 export function Review({

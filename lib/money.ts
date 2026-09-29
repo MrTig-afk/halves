@@ -4,6 +4,9 @@ export function formatCents(cents: number): string {
   return `${sign}$${(Math.abs(cents) / 100).toFixed(2)}`;
 }
 
+// A line price in a list, as printed on a receipt: "3.10", "-2.00".
+export const plainCents = (cents: number) => (cents / 100).toFixed(2);
+
 // What a person types into a price box -> cents, or null if it is not an amount.
 // Accepts "12", "12.5", "12.50", "$12.50", "-2", "-$2.00"; at most two decimals.
 export function parseCents(text: string): number | null {
