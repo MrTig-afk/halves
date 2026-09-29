@@ -34,7 +34,7 @@ export async function addPerson(name: string): Promise<number | null> {
 export async function resetPin(id: number): Promise<boolean> {
   const [r] = await query<{ reset: boolean }>(
     `with p as (
-       update person set pin_hash = null, failed_pin_count = 0, locked_until = null, claimed_at = null
+       update person set pin_hash = null, pin_stamp = gen_random_uuid(), failed_pin_count = 0, locked_until = null, claimed_at = null
        where id = $1 and role = 'member' returning id
      ),
      s as (delete from device_session where person_id in (select id from p) returning 1)

@@ -53,7 +53,12 @@ export function SignIn({ tiles, next }: { tiles: Tile[]; next: string }) {
     }
     if (a.error === "claimed") return setStep({ k: "pin", tile: { ...step.tile, claimed: true }, message: "Someone just set this tile's PIN. Enter it to sign in.", n: Date.now() });
     if (a.error === "unclaimed") return setStep({ k: "set", tile: { ...step.tile, claimed: false }, message: "This tile was reset. Choose a new PIN.", n: Date.now() });
-    const message = a.error === "network" ? "Couldn't reach Halves. Check your connection." : "Something went wrong. Try again.";
+    const message =
+      a.error === "network"
+        ? "Couldn't reach Halves. Check your connection."
+        : a.error === "changed"
+          ? "This tile's PIN just changed. Try again."
+          : "Something went wrong. Try again.";
     // Every answer gets a fresh pad (new n -> new key), so a digit typed next never resends the old PIN.
     setStep(step.k === "set" ? { k: "set", tile: step.tile, message, n: Date.now() } : { k: "pin", tile: step.tile, message, n: Date.now() });
   };

@@ -98,6 +98,14 @@ CREATE TABLE IF NOT EXISTS receipt_photo (
 -- Tile names are unique whatever the letter case, so "rahul" can never sit beside "Rahul".
 CREATE UNIQUE INDEX IF NOT EXISTS person_name_lower ON person (lower(name));
 
+-- Which PIN a session was signed in with. Every PIN change (claim, admin reset, Change PIN) gives
+-- the person a new stamp, and a session counts only while it carries the current one - so a
+-- sign-in that checked a PIN just before it changed writes a stale stamp and signs no one in.
+ALTER TABLE person ADD COLUMN IF NOT EXISTS pin_stamp uuid NOT NULL DEFAULT gen_random_uuid();
+ALTER TABLE device_session ADD COLUMN IF NOT EXISTS pin_stamp uuid;
+UPDATE device_session s SET pin_stamp = p.pin_stamp FROM person p WHERE s.person_id = p.id AND s.pin_stamp IS NULL;
+ALTER TABLE device_session ALTER COLUMN pin_stamp SET NOT NULL;
+
 -- A bill is settled once and stays settled: settlement_id may go from null to a round, never
 -- back to null and never to another round. The grants below allow updating the column at all;
 -- this is what makes that update one-way.

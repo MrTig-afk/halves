@@ -22,6 +22,9 @@ export function pushEndpoint(v: unknown): string | null {
   return ok ? url.href : null;
 }
 
+// Only phones whose session still signs someone in (the pin_stamp rule in lib/session.ts).
+const LIVE = "join device_session s on s.id = ps.session_id join person p on p.id = s.person_id and p.pin_stamp = s.pin_stamp";
+
 const configured = () => !!(process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY && process.env.ADMIN_EMAIL);
 
 // Refused for good: gone (404/410), or not usable with our key (400/403, e.g. after a key change).
@@ -31,7 +34,7 @@ export async function notify(personId: number, note: Note): Promise<void> {
   if (!configured()) return console.error(JSON.stringify({ event: "push_unconfigured" }));
   const { VAPID_PUBLIC_KEY: publicKey, VAPID_PRIVATE_KEY: privateKey, ADMIN_EMAIL: email } = process.env as Record<string, string>;
   const subs = await query<{ id: number; endpoint: string; p256dh: string; auth: string }>(
-    "select id::int, endpoint, p256dh, auth from push_subscription where person_id = $1",
+    `select ps.id::int, ps.endpoint, ps.p256dh, ps.auth from push_subscription ps ${LIVE} where ps.person_id = $1`,
     [personId],
   );
   await Promise.all(
@@ -61,7 +64,7 @@ export const notifyLater = (personId: number, note: Note) =>
 export async function hasPush(personId: number): Promise<boolean> {
   if (!configured()) return false;
   try {
-    const [r] = await query<{ yes: boolean }>("select exists (select 1 from push_subscription where person_id = $1) as yes", [personId]);
+    const [r] = await query<{ yes: boolean }>(`select exists (select 1 from push_subscription ps ${LIVE} where ps.person_id = $1) as yes`, [personId]);
     return r.yes;
   } catch {
     return false;

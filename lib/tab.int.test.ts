@@ -157,7 +157,7 @@ describe.skipIf(!live)("the tab on a real database", async () => {
   }, 60_000);
 
   it("ends a phone's notifications with its session (sign out, PIN change, PIN reset)", async () => {
-    const [s] = await query<{ id: string }>("insert into device_session (person_id) values ($1) returning id", [A.id]);
+    const [s] = await query<{ id: string }>("insert into device_session (person_id, pin_stamp) select id, pin_stamp from person where id = $1 returning id", [A.id]);
     const endpoint = `https://fcm.googleapis.com/fcm/send/int-test-${s.id}`;
     await query("insert into push_subscription (person_id, session_id, endpoint, p256dh, auth) values ($1, $2, $3, 'p', 'a')", [A.id, s.id, endpoint]);
     await query("delete from device_session where id = $1", [s.id]);
