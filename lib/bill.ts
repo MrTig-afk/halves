@@ -17,7 +17,8 @@ export type NewBill = {
 
 // What saving answers: the stored bill's partner, description, amount and photo state, and the tab
 // with that partner just before this bill (positive = they owe me); after it is was + owes. A retry
-// of a bill already saved answers with the stored values.
+// of a bill already saved answers with the stored values. `notified`: the partner has a phone that
+// gets notifications, so "<Partner> has been notified." is true.
 export type Saved = {
   duplicate: boolean;
   photo: "kept" | "not_kept_full" | "none";
@@ -25,6 +26,7 @@ export type Saved = {
   partner_id: number;
   description: string;
   was: number;
+  notified: boolean;
 };
 
 export class BillError extends Error {}

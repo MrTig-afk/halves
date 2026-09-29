@@ -25,7 +25,7 @@ export type Draft = {
   photo: Blob | null; // the cropped receipt, kept with the bill
   ai: ReceiptReading | null; // what the AI read, stored unchanged
 };
-export type SavedBill = { description: string; partnerName: string; owes: number; was: number; photo: string };
+export type SavedBill = { description: string; partnerName: string; owes: number; was: number; photo: string; notified: boolean };
 
 const ORDER: Share[] = ["payer", "split", "partner"];
 type Snapshot = { shares: Map<number, Share>; partnerId: number | null }; // what a voice change replaced
@@ -131,7 +131,7 @@ export function Review({
     if (r.ok) {
       // A retried save answers with the bill stored the first time, which is the one to show.
       const stored = partners.find((p) => p.id === r.partner_id);
-      return onSaved({ description: r.description, partnerName: stored ? first(stored.name) : partnerName, owes: r.owes, was: r.was, photo: r.photo });
+      return onSaved({ description: r.description, partnerName: stored ? first(stored.name) : partnerName, owes: r.owes, was: r.was, photo: r.photo, notified: r.notified });
     }
     if (r.error === "signed_out") return router.replace("/signin");
     // Anything worth sending again (no connection, a timeout, a server failure) gets the approved

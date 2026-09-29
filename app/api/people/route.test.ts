@@ -55,7 +55,6 @@ describe("POST /api/people/<id>/reset", () => {
     const sql = query.mock.calls[0][0] as string;
     expect(sql).toMatch(/role = 'member'/);
     expect(sql).toMatch(/delete from device_session/);
-    expect(sql).toMatch(/delete from push_subscription/);
   });
 
   it("answers 404 for an admin, an unknown id or a bad id", async () => {

@@ -16,6 +16,8 @@ vi.mock("@/lib/session", () => ({
     return who.current;
   },
 }));
+// Saving tells the partner's phones once the response has gone; here there is no response, so now.
+vi.mock("next/server", async (actual) => ({ ...(await actual<object>()), after: (fn: () => unknown) => void fn() }));
 
 const live = !!process.env.DATABASE_URL;
 
@@ -152,6 +154,14 @@ describe.skipIf(!live)("the tab on a real database", async () => {
     }
     await settle(A, B);
     expect(await balance(A, B)).toBe(0);
+  }, 60_000);
+
+  it("ends a phone's notifications with its session (sign out, PIN change, PIN reset)", async () => {
+    const [s] = await query<{ id: string }>("insert into device_session (person_id) values ($1) returning id", [A.id]);
+    const endpoint = `https://fcm.googleapis.com/fcm/send/int-test-${s.id}`;
+    await query("insert into push_subscription (person_id, session_id, endpoint, p256dh, auth) values ($1, $2, $3, 'p', 'a')", [A.id, s.id, endpoint]);
+    await query("delete from device_session where id = $1", [s.id]);
+    expect(await query("select 1 from push_subscription where endpoint = $1", [endpoint])).toEqual([]);
   }, 60_000);
 
   it("leaves settled bills unchangeable by the app's role, including un-settling them", async () => {

@@ -906,3 +906,19 @@ dialog.sheet::backdrop {
 .block {
   display: block;
 }
+
+/* A5: a whole screen over Home, once (a modal dialog, so Home behind it is inert). */
+dialog.takeover {
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  max-height: none;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: var(--bg);
+  color: var(--fg);
+}
+dialog.takeover:not([open]) {
+  display: none;
+}
