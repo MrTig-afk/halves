@@ -3,6 +3,7 @@
 // Sign-in: one tile per person, a PIN pad, choose-a-PIN (twice), and the lockout countdown.
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
+import { initial } from "@/lib/names";
 
 export type Tile = { id: number; name: string; admin: boolean; claimed: boolean };
 
@@ -23,7 +24,6 @@ async function send(path: string, personId: number, pin: string): Promise<Answer
   }
 }
 
-const initial = (name: string) => name.trim().charAt(0).toUpperCase();
 
 export function SignIn({ tiles }: { tiles: Tile[] }) {
   const router = useRouter();
