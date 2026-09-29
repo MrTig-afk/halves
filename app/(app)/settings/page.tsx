@@ -4,6 +4,7 @@ import { Appearance } from "@/components/Appearance";
 import { SignOutButton } from "@/components/SignOutButton";
 import { initial } from "@/lib/names";
 import { people } from "@/lib/people";
+import { photoSummary } from "@/lib/photos";
 import { requirePerson } from "@/lib/session";
 import { readTheme, THEME_COOKIE } from "@/lib/theme";
 
@@ -14,7 +15,9 @@ export default async function Settings({ searchParams }: { searchParams: Promise
   const me = await requirePerson();
   const done = (await searchParams).done;
   const admin = me.role === "admin";
-  const count = admin ? (await people()).length : 0;
+  const [everyone, photos] = admin ? await Promise.all([people(), photoSummary(me.id)]) : [[], null];
+  const count = everyone.length;
+  const toExport = photos?.count ?? 0;
   return (
     <main className="screen">
       <div className="bar">
@@ -51,6 +54,12 @@ export default async function Settings({ searchParams }: { searchParams: Promise
             <Link href="/settings/people" className="li">
               <span className="grow">People</span>
               <span className="dim small">{count} ›</span>
+            </Link>
+          )}
+          {admin && (
+            <Link href="/settings/photos" className="li">
+              <span className="grow">Photos</span>
+              <span className="dim small">{toExport ? `${toExport} to export` : "Nothing to export"} ›</span>
             </Link>
           )}
           <div className="li">

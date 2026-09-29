@@ -829,6 +829,7 @@ input.plain[type="date"] {
    the bottom-sheet look, and let the backdrop be the scrim. */
 dialog.sheet {
   top: auto;
+  width: 100%; /* the browser sizes a dialog to its content; a bottom sheet spans the screen */
   margin: 0 auto;
   border: 0;
   padding: 0;
@@ -890,4 +891,18 @@ dialog.sheet::backdrop {
 .banner.ok {
   background: var(--green-tint);
   color: var(--green-strong);
+}
+
+/* Install card (A3) */
+.install {
+  border: 0;
+  width: 100%;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  flex: none;
+}
+.block {
+  display: block;
 }
