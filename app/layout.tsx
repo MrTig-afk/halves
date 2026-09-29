@@ -1,6 +1,8 @@
 import type { Metadata, Viewport } from "next";
 import { Figtree } from "next/font/google";
+import { cookies } from "next/headers";
 import { UpdatePrompt } from "@/components/UpdatePrompt";
+import { readTheme, THEME_COLOR, THEME_COOKIE } from "@/lib/theme";
 import "./globals.css";
 
 // Self-hosted at build time by next/font: no request to Google from the phone.
@@ -15,19 +17,28 @@ export const metadata: Metadata = {
   openGraph: { title: "Halves", description: "Split receipts and keep a running tab." },
 };
 
-export const viewport: Viewport = {
-  width: "device-width",
-  initialScale: 1,
-  viewportFit: "cover",
-  themeColor: [
-    { media: "(prefers-color-scheme: light)", color: "#1CC29F" },
-    { media: "(prefers-color-scheme: dark)", color: "#1B1F21" },
-  ],
-};
+// The status bar of an installed app follows this phone's Appearance: the chosen colour, or the
+// phone's own light/dark setting under System.
+export async function generateViewport(): Promise<Viewport> {
+  const theme = readTheme((await cookies()).get(THEME_COOKIE)?.value);
+  return {
+    width: "device-width",
+    initialScale: 1,
+    viewportFit: "cover",
+    themeColor:
+      theme === "system"
+        ? [
+            { media: "(prefers-color-scheme: light)", color: THEME_COLOR.light },
+            { media: "(prefers-color-scheme: dark)", color: THEME_COLOR.dark },
+          ]
+        : THEME_COLOR[theme],
+  };
+}
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  const theme = readTheme((await cookies()).get(THEME_COOKIE)?.value);
   return (
-    <html lang="en-AU" className={figtree.variable}>
+    <html lang="en-AU" className={figtree.variable} data-theme={theme === "system" ? undefined : theme}>
       <body>
         <UpdatePrompt />
         {children}
