@@ -1,7 +1,7 @@
 // The service worker, served with the deploy version inside its bytes so the
 // browser's update check sees a new worker on every deploy (a query-string
 // version alone never changes the registered script).
-// Caches the app shell only, never user data (PRD 6.10).
+// Caches the app shell only, never user data.
 const APP_VERSION = process.env.NEXT_PUBLIC_APP_VERSION || "dev";
 
 const script = `

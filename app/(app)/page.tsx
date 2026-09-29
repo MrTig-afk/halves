@@ -1,8 +1,10 @@
 import Link from "next/link";
 import { Icon } from "@/components/Icon";
+import { currentPerson } from "@/lib/session";
 
-// M0 stand-in for Home: the real Home (the tab, open bills, Settle all) is T1.6.
-export default function Home() {
+// Stand-in Home until the real one (the tab, open bills, Settle all) is built.
+export default async function Home() {
+  const me = await currentPerson();
   return (
     <main className="screen">
       <div className="bar">
@@ -22,6 +24,7 @@ export default function Home() {
         <Link href="/scan" className="btn o">
           <Icon name="camera" /> Scan a bill
         </Link>
+        <div className="me">Signed in as {me?.name}</div>
       </div>
     </main>
   );

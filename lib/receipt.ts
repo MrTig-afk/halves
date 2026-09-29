@@ -1,4 +1,4 @@
-// What the AI returns for a receipt, and the ONLY way its text becomes data (PRD 6.4).
+// What the AI returns for a receipt, and the ONLY way its text becomes data.
 // Model output is untrusted: anything outside the schema is rejected, never coerced.
 
 export type LineKind = "item" | "discount" | "surcharge";
@@ -115,7 +115,7 @@ export function parseReceipt(raw: string): ReceiptReading {
     if (kind === "discount" ? price_cents >= 0 : price_cents < 0) throw bad(`line ${i + 1} sign does not match its kind`);
     return { name: text(line.name, 80, `line ${i + 1} name`), price_cents, kind };
   });
-  // A discount belongs to the item directly above it (PRD 6.3), so one cannot come first
+  // A discount belongs to the item directly above it, so one cannot come first
   // or follow a fee.
   lines.forEach((l, i) => {
     if (l.kind === "discount" && (i === 0 || lines[i - 1].kind === "surcharge")) throw bad("discount with no item above it");

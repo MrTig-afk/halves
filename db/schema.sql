@@ -76,10 +76,12 @@ CREATE TABLE IF NOT EXISTS scan_request (
   person_id   bigint      NOT NULL REFERENCES person(id),
   created_at  timestamptz NOT NULL DEFAULT now()
 );
+-- The bill a scan id saved, so a retried save can answer with the stored bill.
+ALTER TABLE scan_request ADD COLUMN IF NOT EXISTS bill_id bigint REFERENCES bill(id);
 
 -- Receipt photos. Same database; kept only while the whole Neon project stays under
 -- 400 MB (checked before each insert), so photos can never fill the 0.5 GB free cap
--- and block saving bills (PRD 6.9).
+-- and block saving bills.
 CREATE TABLE IF NOT EXISTS receipt_photo (
   id           bigint      GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   bill_id      bigint      NOT NULL UNIQUE REFERENCES bill(id),
@@ -90,7 +92,7 @@ CREATE TABLE IF NOT EXISTS receipt_photo (
 );
 
 -- The app role (created once at setup, no DDL rights) gets exactly what the PRD allows.
--- Saved bills are immutable (PRD 6.3): bills only gain a settlement or an archived
+-- Saved bills are immutable: bills only gain a settlement or an archived
 -- photo; line items and settlements are insert-only. Everything is revoked first so
 -- the grants below are the whole truth; skipped when the role does not exist yet.
 DO $$
