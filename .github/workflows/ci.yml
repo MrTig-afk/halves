@@ -17,7 +17,7 @@ jobs:
   ci:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v4
         with:
           node-version: 24
@@ -35,7 +35,7 @@ jobs:
     container:
       image: semgrep/semgrep
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       # Named rulesets, not --config auto: adding a ruleset is a visible edit here.
       # They are still live registry rulesets and can change upstream.
       - run: semgrep scan --config p/typescript --config p/javascript --config p/react --config p/nextjs --config p/secrets --error
