@@ -285,7 +285,11 @@ remembered.
   `halves_app` (no DDL); the owner role runs migrations only.
 - Auth in-app: hashed PINs + signed httpOnly session cookie.
 - AI: Google Gemini Flash (free tier) for receipts and voice audio, response
-  schema; exact model chosen in M0.
+  schema. Chosen in M0 (2026-09-29) by timing real reads of the synthetic
+  sample receipt: primary `gemini-3.5-flash-lite` (3.5 s model call, 2.8-3.0 s
+  through the route, 3.5 s tap-to-items in the browser), fallback
+  `gemini-2.5-flash` (6.0 s); both read every line correctly.
+  `gemini-3.8-flash` and `gemini-3.5-flash` returned 503 (high demand).
 - Push: Web Push + VAPID (the `web-push` library).
 - Swap points: `readReceipt(image)`, `parseVoice(audio, items)`;
   `putPhoto/getPhoto/deletePhoto`; `notify(person, message)`.
