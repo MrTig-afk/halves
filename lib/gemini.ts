@@ -63,7 +63,7 @@ async function quotaWait(res: Response, now = new Date()): Promise<{ seconds?: n
   return { daily };
 }
 
-// ponytail: reads the Pacific clock once, so a daylight-saving change night can be an hour off.
+// Reads the Pacific clock once, so on a daylight-saving change night it can be an hour off.
 export function untilPacificMidnight(now: Date): number {
   const [h, m, s] = new Intl.DateTimeFormat("en-US", { timeZone: "America/Los_Angeles", hourCycle: "h23", hour: "2-digit", minute: "2-digit", second: "2-digit" })
     .format(now)
@@ -72,7 +72,7 @@ export function untilPacificMidnight(now: Date): number {
   return 86_400 - (h * 3600 + m * 60 + s);
 }
 
-// The moment a paused AI feature works again, for "paused until <time>" (userflow E4).
+// The moment a paused AI feature works again, for "paused until <time>".
 export const pausedUntil = (e: GeminiError) => (e.retryAfterS ? new Date(Date.now() + e.retryAfterS * 1000).toISOString() : undefined);
 
 // Primary twice only for transient failures (5xx, timeout, network), then the fallback once;

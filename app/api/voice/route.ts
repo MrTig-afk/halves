@@ -3,6 +3,7 @@
 // Signed-in devices only: every call spends the shared free AI allowance.
 import { query } from "@/lib/db";
 import { GeminiError, pausedUntil, readVoice } from "@/lib/gemini";
+import { fail } from "@/lib/http";
 import { currentPerson } from "@/lib/session";
 import { matchPerson, VoiceError, type VoiceReply } from "@/lib/voice";
 
@@ -10,9 +11,6 @@ export const maxDuration = 60;
 
 const MAX_AUDIO_BYTES = 1024 * 1024; // ~60 s of browser Opus; the recorder stops at 30 s
 const MAX_ITEMS = 200;
-
-const fail = (status: number, error: string, message: string, retryable = false, until?: string) =>
-  Response.json({ error, message, retryable, ...(until && { until }) }, { status });
 
 // The recording's type comes from its bytes, never from what the browser claims.
 function audioType(b: Buffer): string | null {

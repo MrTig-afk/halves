@@ -1,6 +1,6 @@
 // What the AI returns for a spoken split, and the ONLY way its text becomes data.
 // Model output is untrusted: item numbers outside the list are dropped and named, never guessed.
-// Only the recording and the item names go to the AI (PRD 10.2): a person named in the sentence
+// Only the recording and the item names go to the AI (nothing else may leave the app): a person named in the sentence
 // comes back as the spoken name and is matched on the server.
 import type { Share } from "./split";
 

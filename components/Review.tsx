@@ -5,14 +5,26 @@
 import { useEffect, useRef, useState } from "react";
 import { Icon } from "@/components/Icon";
 import { useVoice } from "@/components/useVoice";
-import { clock, type VoiceResult } from "@/lib/api";
+import { useRouter } from "next/navigation";
+import { clock, postBill, type VoiceResult } from "@/lib/api";
+import type { ReceiptReading } from "@/lib/receipt";
+import { MAX_BILL_CENTS } from "@/lib/bill";
 import { formatCents, parseCents } from "@/lib/money";
 import type { LineKind } from "@/lib/receipt";
 import { partnerOwes, type Share } from "@/lib/split";
 
 export type Partner = { id: number; name: string };
 export type Row = { key: number; name: string; price_cents: number; kind: LineKind; share: Share };
-export type Draft = { description: string; date: string; total_cents: number | null; rows: Row[] };
+export type Draft = {
+  scan_id: string; // one per draft: a retried Save can never add the bill twice
+  description: string;
+  date: string;
+  total_cents: number | null;
+  rows: Row[];
+  photo: Blob | null; // the cropped receipt, kept with the bill
+  ai: ReceiptReading | null; // what the AI read, stored unchanged
+};
+export type SavedBill = { description: string; partnerName: string; owes: number; was: number; photo: string };
 
 const ORDER: Share[] = ["payer", "split", "partner"];
 type Snapshot = { shares: Map<number, Share>; partnerId: number | null }; // what a voice change replaced
@@ -20,7 +32,20 @@ const first = (name: string) => name.trim().split(/\s+/)[0] ?? name;
 const initial = (name: string) => name.trim().charAt(0).toUpperCase();
 let nextKey = 1_000_000;
 
-export function Review({ me, partners, draft, onBack }: { me: string; partners: Partner[]; draft: Draft; onBack: () => void }) {
+export function Review({
+  me,
+  partners,
+  draft,
+  onBack,
+  onSaved,
+}: {
+  me: string;
+  partners: Partner[];
+  draft: Draft;
+  onBack: () => void;
+  onSaved: (s: SavedBill) => void;
+}) {
+  const router = useRouter();
   const [description, setDescription] = useState(draft.description);
   const [date, setDate] = useState(draft.date);
   const [partnerId, setPartnerId] = useState(partners[0]?.id ?? 0);
@@ -76,6 +101,50 @@ export function Review({ me, partners, draft, onBack }: { me: string; partners: 
     setNote(restore ? "Undone. Tap the mic and say which items are shared." : "Applied. Tap the mic to change more.");
   };
 
+  // Save sends the lines and the total; the server works out what is owed. A failure keeps
+  // everything on screen, and Retry sends the same bill again.
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<{ text: string; retry: boolean } | null>(null);
+  const save = async () => {
+    if (rows.reduce((s, r) => s + Math.abs(r.price_cents), 0) > MAX_BILL_CENTS) {
+      return setSaveError({ text: "A bill can be at most $100,000. Check the prices.", retry: false });
+    }
+    setSaving(true);
+    setSaveError(null);
+    const r = await postBill(
+      {
+        scan_id: draft.scan_id,
+        partner_id: partnerId,
+        description: description.trim(),
+        date,
+        total_cents: total,
+        lines: rows.map((row) => ({
+          name: row.name.trim() || (row.kind === "item" ? "Item" : row.kind === "discount" ? "Discount" : "Fee"),
+          price_cents: row.price_cents,
+          kind: row.kind,
+          share: row.kind === "item" ? row.share : null,
+        })),
+        ai: draft.ai,
+      },
+      draft.photo,
+    );
+    setSaving(false);
+    if (r.ok) {
+      // A retried save answers with the bill stored the first time, which is the one to show.
+      const stored = partners.find((p) => p.id === r.partner_id);
+      return onSaved({ description: r.description, partnerName: stored ? first(stored.name) : partnerName, owes: r.owes, was: r.was, photo: r.photo });
+    }
+    if (r.error === "signed_out") return router.replace("/signin");
+    // Anything worth sending again (no connection, a timeout, a server failure) gets the approved
+    // Retry message; a request the server refused gets its own message and no Retry.
+    setSaveError(r.retryable ? { text: "Couldn't save. Check your connection and try again. Nothing you entered is lost.", retry: true } : { text: r.message, retry: false });
+  };
+  // After a failure that may have reached the server, the bill might already be saved under this
+  // scan id: nothing can change and Back is off, so Retry sends exactly what was shown.
+  const locked = saving || !!saveError?.retry;
+  const busy = saving || voice.state.k === "listening" || voice.state.k === "working";
+  const canSave = !busy && !!partner && description.trim() !== "" && date !== "" && rows.some((r) => r.kind === "item");
+
   const update = (key: number, patch: Partial<Row>) => setRows((rs) => rs.map((r) => (r.key === key ? { ...r, ...patch } : r)));
   // Removing an item removes the discount lines under it too: a discount belongs to its item,
   // and must never slide onto a different one.
@@ -113,12 +182,18 @@ export function Review({ me, partners, draft, onBack }: { me: string; partners: 
   return (
     <main className="screen">
       <div className="bar">
-        <button type="button" className="back" aria-label="Back" onClick={onBack}>
+        <button type="button" className="back" aria-label="Back" onClick={onBack} disabled={locked}>
           ‹
         </button>
         <span className="ttl">New bill</span>
       </div>
-      <div className="body" style={{ gap: 8 }}>
+      {/* Nothing can change while the bill is being saved: what is on screen is what is sent. */}
+      <div className="body" style={{ gap: 8 }} inert={locked}>
+        {saveError && (
+          <div className="banner amber" role="alert">
+            {saveError.text}
+          </div>
+        )}
         <label className="field">
           <span className="xs dim">Description</span>
           <input className="plain b" value={description} placeholder="What was it?" onChange={(e) => setDescription(e.target.value)} maxLength={60} />
@@ -140,7 +215,7 @@ export function Review({ me, partners, draft, onBack }: { me: string; partners: 
           <input className="plain dim num" type="date" value={date} onChange={(e) => setDate(e.target.value)} aria-label="Date" />
           <span className="dim">·</span>
           {/* The receipt total decides All ½ and All partner's; editable in case the AI misread it. */}
-          <MoneyInput cents={total} label="Receipt total" allowEmpty placeholder="Total" onChange={setTotal} ok={(v) => v >= 0} />
+          <MoneyInput cents={total} label="Receipt total" allowEmpty placeholder="Total" onChange={setTotal} ok={(v) => v >= 0 && v <= MAX_BILL_CENTS} />
         </div>
         <div className="row">
           <button type="button" className="btn ghost sm" onClick={() => all("split")}>
@@ -215,7 +290,7 @@ export function Review({ me, partners, draft, onBack }: { me: string; partners: 
                   label="Price"
                   onFocus={() => setEditing(r.key)}
                   onChange={(v) => update(r.key, { price_cents: v ?? 0 })}
-                  ok={(v) => (r.kind === "discount" ? v < 0 : v >= 0)}
+                  ok={(v) => Math.abs(v) <= MAX_BILL_CENTS && (r.kind === "discount" ? v < 0 : v >= 0)}
                 />
                 {r.kind === "item" ? (
                   <button type="button" className="s3" data-v={r.share} data-k={knob} aria-label={`${r.name || "Item"}: ${r.share === "payer" ? "yours" : r.share === "split" ? "split equally" : `${partnerName}'s`}`} onClick={(e) => slide(e, r)} />
@@ -241,7 +316,7 @@ export function Review({ me, partners, draft, onBack }: { me: string; partners: 
             className={voice.state.k === "listening" ? "mic live" : "mic"}
             aria-label={voice.state.k === "listening" ? "Stop and work out the split" : "Speak the split"}
             aria-pressed={voice.state.k === "listening"}
-            disabled={voice.state.k === "working" || !rows.some((r) => r.kind === "item")}
+            disabled={locked || voice.state.k === "working" || !rows.some((r) => r.kind === "item")}
             onClick={() => {
               if (undo) setUndo(null); // speaking again keeps the last change
               setNote(null);
@@ -250,12 +325,12 @@ export function Review({ me, partners, draft, onBack }: { me: string; partners: 
           >
             <Icon name="mic" size={20} />
           </button>
-          <button type="button" className="btn sm" style={{ flex: "none" }} disabled title="Saving arrives with the next step">
-            Save
+          <button type="button" className="btn sm" style={{ flex: "none" }} disabled={!canSave} onClick={save}>
+            {saving ? "Saving…" : saveError?.retry ? "Retry" : "Save"}
           </button>
         </div>
         {undo && (
-          <div className="row">
+          <div className="row" inert={locked}>
             <button type="button" className="btn sm grow" onClick={() => settle(false)}>
               Keep
             </button>
@@ -314,7 +389,7 @@ function MoneyInput({
   );
 }
 
-// What the voice call came back with, in the words of the approved flow (B6, E4).
+// What the voice call came back with.
 function Heard({ r }: { r: VoiceResult }) {
   if (!r.ok) {
     return <span className="xs">{r.error === "ai_paused" && r.until ? `Voice is paused until ${clock(r.until)}, use the sliders` : r.message}</span>;

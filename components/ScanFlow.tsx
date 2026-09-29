@@ -7,9 +7,10 @@ import { useRouter } from "next/navigation";
 import { useRef, useState } from "react";
 import { Icon } from "@/components/Icon";
 import { ImageCropper } from "@/components/ImageCropper";
-import { Review, type Draft, type Partner } from "@/components/Review";
+import { Review, type Draft, type Partner, type SavedBill } from "@/components/Review";
 import { clock, postReceipt, type ApiFailure } from "@/lib/api";
 import { cropToJpeg, loadImage, type CropRect } from "@/lib/cropImage";
+import { formatCents } from "@/lib/money";
 import type { ReceiptReading } from "@/lib/receipt";
 
 type Step =
@@ -17,13 +18,20 @@ type Step =
   | { k: "crop"; img: HTMLImageElement }
   | { k: "reading"; img: HTMLImageElement }
   | { k: "review"; draft: Draft }
-  | { k: "failed"; img: HTMLImageElement; rect: CropRect | null; failure: ApiFailure };
+  | { k: "failed"; img: HTMLImageElement; rect: CropRect | null; failure: ApiFailure; jpeg: Blob }
+  | { k: "saved"; saved: SavedBill };
 
 const today = () => new Date().toLocaleDateString("en-CA"); // YYYY-MM-DD in local time
+// crypto.randomUUID only exists on https and localhost; a phone testing over the LAN is neither.
+const uuid = () =>
+  crypto.randomUUID?.() ??
+  "10000000-1000-4000-8000-100000000000".replace(/[018]/g, (c) => (Number(c) ^ (crypto.getRandomValues(new Uint8Array(1))[0] & (15 >> (Number(c) / 4)))).toString(16));
 
-function draftFrom(reading: ReceiptReading | null): Draft {
-  if (!reading) return { description: "", date: today(), total_cents: null, rows: [{ key: 0, name: "", price_cents: 0, kind: "item", share: "payer" }] };
+function draftFrom(reading: ReceiptReading | null, photo: Blob): Draft {
+  const base = { scan_id: uuid(), photo, ai: reading };
+  if (!reading) return { ...base, description: "", date: today(), total_cents: null, rows: [{ key: 0, name: "", price_cents: 0, kind: "item", share: "payer" }] };
   return {
+    ...base,
     description: reading.store_name ?? "",
     date: reading.date ?? today(),
     total_cents: reading.total_cents,
@@ -58,7 +66,7 @@ export function ScanFlow({ me, partners }: { me: string; partners: Partner[] }) 
     const r = await postReceipt(jpeg);
     if (mine !== run.current) return;
     if (!r.ok && r.error === "signed_out") return router.replace("/signin");
-    setStep(r.ok ? { k: "review", draft: draftFrom(r.reading) } : { k: "failed", img, rect, failure: r });
+    setStep(r.ok ? { k: "review", draft: draftFrom(r.reading, jpeg) } : { k: "failed", img, rect, failure: r, jpeg });
   };
 
   if (step.k === "crop") return <ImageCropper img={step.img} onCancel={() => setStep({ k: "pick" })} onConfirm={(rect) => read(step.img, rect)} />;
@@ -73,14 +81,17 @@ export function ScanFlow({ me, partners }: { me: string; partners: Partner[] }) 
       />
     );
   }
-  if (step.k === "review") return <Review me={me} partners={partners} draft={step.draft} onBack={() => setStep({ k: "pick" })} />;
+  if (step.k === "review") {
+    return <Review me={me} partners={partners} draft={step.draft} onBack={() => setStep({ k: "pick" })} onSaved={(saved) => setStep({ k: "saved", saved })} />;
+  }
+  if (step.k === "saved") return <Saved s={step.saved} again={() => setStep({ k: "pick" })} done={() => router.push("/")} />;
   if (step.k === "failed") {
     return (
       <Failed
         failure={step.failure}
         recrop={() => setStep({ k: "crop", img: step.img })}
         retry={() => read(step.img, step.rect)}
-        byHand={() => setStep({ k: "review", draft: draftFrom(null) })}
+        byHand={() => setStep({ k: "review", draft: draftFrom(null, step.jpeg) })}
         back={() => setStep({ k: "pick" })}
       />
     );
@@ -174,6 +185,38 @@ function Failed({ failure, recrop, retry, byHand, back }: { failure: ApiFailure;
             Enter by hand
           </button>
         )}
+      </div>
+    </main>
+  );
+}
+
+function Saved({ s, again, done }: { s: SavedBill; again: () => void; done: () => void }) {
+  const now = s.was + s.owes;
+  const tab = (c: number) => (c >= 0 ? `${s.partnerName} owes you ${formatCents(c)}` : `You owe ${s.partnerName} ${formatCents(-c)}`);
+  return (
+    <main className="screen">
+      <div className="center">
+        <div className="icon-art ok">
+          <Icon name="check" size={40} />
+        </div>
+        <b style={{ fontSize: 17 }}>Saved</b>
+        <div className="small">
+          <b>{s.description}</b> · {s.partnerName} owes <span className="num">{formatCents(s.owes)}</span>
+        </div>
+        <div className="soft">
+          <div className="xs dim">Your tab with {s.partnerName}</div>
+          <div className={`num tab-amt ${now >= 0 ? "owed" : "owe"}`}>{tab(now)}</div>
+          <div className="xs dim num">was {s.was >= 0 ? formatCents(s.was) : tab(s.was)}</div>
+        </div>
+        {s.photo === "not_kept_full" && <span className="dim xs">Photo not kept: photo storage is full. Export photos in Settings to free space.</span>}
+      </div>
+      <div className="foot">
+        <button type="button" className="btn" onClick={again}>
+          Scan another
+        </button>
+        <button type="button" className="btn ghost sm" onClick={done}>
+          Done
+        </button>
       </div>
     </main>
   );

@@ -2,14 +2,16 @@
 // network error): the server already retries Gemini itself, so retrying anything else would
 // multiply free-tier calls. Every other failure is shown, and `retryable` tells the UI to
 // offer Try again.
+import type { NewBill, Saved } from "./bill";
 import type { ReceiptReading } from "./receipt";
 import type { VoiceReply } from "./voice";
 
 export type ApiFailure = { error: string; message: string; retryable: boolean; until?: string };
 export type ReadResult = { ok: true; reading: ReceiptReading } | ({ ok: false } & ApiFailure);
 export type VoiceResult = ({ ok: true } & VoiceReply) | ({ ok: false } & ApiFailure);
+export type SaveResult = ({ ok: true } & Saved) | ({ ok: false } & ApiFailure);
 
-// "paused until <time>" (userflow E4), in the device's local time.
+// "paused until <time>", in the device's local time.
 export const clock = (iso: string) => new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 
 const SLOW: ApiFailure = { error: "timeout", message: "That took too long. Try again.", retryable: true };
@@ -64,4 +66,15 @@ export async function postVoice(audio: Blob, items: string[]): Promise<VoiceResu
     return form;
   });
   return r.ok ? { ok: true, ...(r.body as VoiceReply) } : r;
+}
+
+// Sending the same bill twice is safe: the scan id makes the server save it once.
+export async function postBill(bill: NewBill, photo: Blob | null): Promise<SaveResult> {
+  const r = await send("/api/bill", () => {
+    const form = new FormData();
+    form.append("bill", JSON.stringify(bill));
+    if (photo) form.append("photo", photo, "receipt.jpg");
+    return form;
+  });
+  return r.ok ? { ok: true, ...(r.body as Saved) } : r;
 }
