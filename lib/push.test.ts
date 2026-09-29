@@ -31,7 +31,7 @@ describe("pushEndpoint", () => {
       "http://fcm.googleapis.com/x",
       "https://localhost/x",
       "https://169.254.169.254/latest",
-      "https://user:pw@fcm.googleapis.com/x",
+      Object.assign(new URL("https://fcm.googleapis.com/x"), { username: "someone" }).href, // userinfo in the URL
       `https://fcm.googleapis.com/${"x".repeat(1000)}`,
       42,
       null,
