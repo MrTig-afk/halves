@@ -8,7 +8,7 @@ import { useRef, useState } from "react";
 import { Icon } from "@/components/Icon";
 import { ImageCropper } from "@/components/ImageCropper";
 import { Review, type Draft, type Partner } from "@/components/Review";
-import { postReceipt, type ApiFailure } from "@/lib/api";
+import { clock, postReceipt, type ApiFailure } from "@/lib/api";
 import { cropToJpeg, loadImage, type CropRect } from "@/lib/cropImage";
 import type { ReceiptReading } from "@/lib/receipt";
 
@@ -153,7 +153,7 @@ function Failed({ failure, recrop, retry, byHand, back }: { failure: ApiFailure;
         <div className="icon-art">
           <Icon name={paused ? "pause" : "receipt"} size={34} />
         </div>
-        <b>{noItems ? "Couldn't find items in this photo" : paused ? "Receipt reading is paused" : "That didn't work"}</b>
+        <b>{noItems ? "Couldn't find items in this photo" : paused ? `Receipt reading is paused${failure.until ? ` until ${clock(failure.until)}` : ""}` : "That didn't work"}</b>
         <span className="dim small">
           {noItems ? "Try cropping closer to the item lines, or retake it in better light." : failure.message}
         </span>

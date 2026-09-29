@@ -25,6 +25,19 @@ beforeEach(() => {
 });
 
 describe("POST /api/receipt", () => {
+  it("pauses reading for the day with the E4 copy and says until when", async () => {
+    const r = await answer(new GeminiError("quota", "429", false, 3600, true));
+    expect(r).toMatchObject({ status: 429, error: "ai_paused", retryable: false });
+    expect(r.message).toBe("The free AI limit for today is used up. You can still enter this bill by hand, and your photo is kept.");
+    expect(Date.parse(r.until) - Date.now()).toBeGreaterThan(3_500_000);
+  });
+
+  it("offers Try again for a per-minute limit, without claiming the day is used up", async () => {
+    const r = await answer(new GeminiError("quota", "429", false, 40));
+    expect(r).toMatchObject({ status: 429, error: "ai_paused", retryable: true });
+    expect(r.message).not.toMatch(/today/);
+  });
+
   it("returns the reading for a real photo", async () => {
     readReceipt.mockResolvedValueOnce({ reading: { lines: [] }, model: "m" });
     const res = await post(receipt);
@@ -42,7 +55,7 @@ describe("POST /api/receipt", () => {
   });
 
   it("stops at the free-tier limit with the paused message", async () => {
-    expect(await answer(new GeminiError("quota", "429"))).toMatchObject({ status: 429, error: "ai_paused", retryable: false });
+    expect(await answer(new GeminiError("quota", "429", false, undefined, true))).toMatchObject({ status: 429, error: "ai_paused", retryable: false });
   });
 
   it("refuses a signed-out device before reading anything", async () => {
