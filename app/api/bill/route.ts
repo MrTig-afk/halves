@@ -9,6 +9,7 @@ import { fail } from "@/lib/http";
 import { ImageError, MAX_UPLOAD_BYTES, normaliseImage } from "@/lib/image";
 import { currentPerson } from "@/lib/session";
 import { partnerOwes } from "@/lib/split";
+import { TAB_BALANCE } from "@/lib/tab";
 
 export const maxDuration = 30;
 
@@ -51,11 +52,6 @@ const STORED = `
   from scan_request s join bill b on b.id = s.bill_id
   where s.scan_id = $1 and s.person_id = $2`;
 
-// The tab between two people: what the partner owes me on open bills, minus what I owe them.
-const TAB = `
-  select coalesce(sum(case when payer_id = $1 then partner_owes_cents else -partner_owes_cents end), 0)::int as balance
-  from bill where settlement_id is null
-    and ((payer_id = $1 and partner_id = $2) or (payer_id = $2 and partner_id = $1))`;
 
 export async function POST(req: Request) {
   const me = await currentPerson();
@@ -115,7 +111,7 @@ export async function POST(req: Request) {
     const [stored] = await query<Omit<Saved, "duplicate" | "was">>(STORED, [bill.scan_id, me.id]);
     // A scan id used by the other person is refused.
     if (!stored) return fail(409, "conflict", "This bill couldn't be saved. Scan it again.");
-    const [tab] = await query<{ balance: number }>(TAB, [me.id, stored.partner_id]);
+    const [tab] = await query<{ balance: number }>(TAB_BALANCE, [me.id, stored.partner_id]);
     saved = { duplicate: true, ...stored, was: tab.balance - stored.owes };
   }
   console.info(JSON.stringify({ event: saved.duplicate ? "bill_duplicate" : "bill_saved", lines: bill.lines.length, photo: saved.photo }));
