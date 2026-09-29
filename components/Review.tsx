@@ -2,7 +2,10 @@
 
 // The review screen: name the bill, pick who it is with, and set each item's share with a
 // 3-position slider (mine / half / partner's). Any name or price can be tapped and edited.
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { Icon } from "@/components/Icon";
+import { useVoice } from "@/components/useVoice";
+import { clock, type VoiceResult } from "@/lib/api";
 import { formatCents, parseCents } from "@/lib/money";
 import type { LineKind } from "@/lib/receipt";
 import { partnerOwes, type Share } from "@/lib/split";
@@ -12,6 +15,7 @@ export type Row = { key: number; name: string; price_cents: number; kind: LineKi
 export type Draft = { description: string; date: string; total_cents: number | null; rows: Row[] };
 
 const ORDER: Share[] = ["payer", "split", "partner"];
+type Snapshot = { shares: Map<number, Share>; partnerId: number | null }; // what a voice change replaced
 const first = (name: string) => name.trim().split(/\s+/)[0] ?? name;
 const initial = (name: string) => name.trim().charAt(0).toUpperCase();
 let nextKey = 1_000_000;
@@ -27,6 +31,51 @@ export function Review({ me, partners, draft, onBack }: { me: string; partners: 
   const partnerName = partner ? first(partner.name) : "your partner";
   const owes = partnerOwes(rows, total);
 
+  // Voice: the item numbers the AI answers with map to the rows as they were when sent. A change
+  // is applied at once (sliders animate, rows flash) and Undo puts back exactly what it replaced.
+  const sent = useRef<number[]>([]);
+  const [flash, setFlash] = useState<Set<number>>(new Set());
+  const [undo, setUndo] = useState<Snapshot | null>(null);
+  const [note, setNote] = useState<string | null>(null);
+  const now = useRef({ rows, partnerId }); // the committed state, for building the Undo snapshot
+  useEffect(() => {
+    now.current = { rows, partnerId };
+  });
+  const heard = (r: VoiceResult) => {
+    if (!r.ok || (!r.changes.length && r.partner === null)) return;
+    const share = new Map(r.changes.map((c) => [sent.current[c.item - 1], c.share]));
+    const before: Snapshot = { shares: new Map(), partnerId: null };
+    setRows(
+      now.current.rows.map((row) => {
+        const s = share.get(row.key);
+        if (!s || row.kind !== "item") return row;
+        before.shares.set(row.key, row.share);
+        return { ...row, share: s };
+      }),
+    );
+    if (r.partner !== null && r.partner !== now.current.partnerId) {
+      before.partnerId = now.current.partnerId;
+      setPartnerId(r.partner);
+    }
+    setUndo(before);
+    setFlash(new Set(share.keys()));
+    setTimeout(() => setFlash(new Set()), 1400);
+  };
+  const voice = useVoice(() => {
+    const items = rows.filter((r) => r.kind === "item");
+    sent.current = items.map((r) => r.key);
+    return items.map((r, i) => r.name.trim() || `Item ${i + 1}`);
+  }, heard);
+  const settle = (restore: boolean) => {
+    if (restore && undo) {
+      setRows((rs) => rs.map((r) => (undo.shares.has(r.key) ? { ...r, share: undo.shares.get(r.key)! } : r)));
+      if (undo.partnerId !== null) setPartnerId(undo.partnerId);
+    }
+    setUndo(null);
+    voice.reset();
+    setNote(restore ? "Undone. Tap the mic and say which items are shared." : "Applied. Tap the mic to change more.");
+  };
+
   const update = (key: number, patch: Partial<Row>) => setRows((rs) => rs.map((r) => (r.key === key ? { ...r, ...patch } : r)));
   // Removing an item removes the discount lines under it too: a discount belongs to its item,
   // and must never slide onto a different one.
@@ -38,7 +87,11 @@ export function Review({ me, partners, draft, onBack }: { me: string; partners: 
       if (rs[i]?.kind === "item") while (rs[end]?.kind === "discount") end++;
       return [...rs.slice(0, i), ...rs.slice(end)];
     });
-  const all = (share: Share) => setRows((rs) => rs.map((r) => (r.kind === "item" ? { ...r, share } : r)));
+  // A share set by hand after a voice change keeps that change: Undo would otherwise overwrite it.
+  const all = (share: Share) => {
+    setUndo(null);
+    setRows((rs) => rs.map((r) => (r.kind === "item" ? { ...r, share } : r)));
+  };
   const add = () => {
     const key = nextKey++;
     setRows((rs) => [...rs, { key, name: "", price_cents: 0, kind: "item", share: "split" }]);
@@ -52,6 +105,7 @@ export function Review({ me, partners, draft, onBack }: { me: string; partners: 
       const b = e.currentTarget.getBoundingClientRect();
       share = ORDER[Math.max(0, Math.min(2, Math.floor(((e.clientX - b.left) / b.width) * 3)))];
     }
+    setUndo(null);
     update(r.key, { share });
   };
 
@@ -71,7 +125,10 @@ export function Review({ me, partners, draft, onBack }: { me: string; partners: 
         </label>
         <div className="row small center-y">
           <span className="dim">With you and</span>
-          <select className="plain b" value={partnerId} onChange={(e) => setPartnerId(Number(e.target.value))} aria-label="Split with">
+          <select className="plain b" value={partnerId} onChange={(e) => {
+              setUndo(null);
+              setPartnerId(Number(e.target.value));
+            }} aria-label="Split with">
             {partners.map((p) => (
               <option key={p.id} value={p.id}>
                 {p.name}
@@ -96,6 +153,19 @@ export function Review({ me, partners, draft, onBack }: { me: string; partners: 
             All {partnerName}&apos;s
           </button>
         </div>
+        {(voice.state.k !== "idle" || note) && (
+          <div className="voice" role="status">
+            {voice.state.k === "listening" ? (
+              <span className="dim xs">Listening… tap the mic again when you are done</span>
+            ) : voice.state.k === "working" ? (
+              <span className="dim xs">Working it out…</span>
+            ) : voice.state.k === "done" ? (
+              <Heard r={voice.state.result} />
+            ) : (
+              <span className="dim xs">{note}</span>
+            )}
+          </div>
+        )}
         <div className="row center-y">
           <span className="grow xs dim">Slide each item</span>
           <div className="legend">
@@ -113,7 +183,7 @@ export function Review({ me, partners, draft, onBack }: { me: string; partners: 
               // Editing a row shows Remove under its name; it stays until another row is edited, never
               // ending on blur (Safari does not focus a clicked button, so blur cannot tell a click on
               // Remove from leaving the row). The slider never moves, so a tap on it is never a Remove.
-              <div key={r.key} className={r.kind === "item" ? "it" : "it sub"}>
+              <div key={r.key} className={`${r.kind === "item" ? "it" : "it sub"}${flash.has(r.key) ? " flash" : ""}`}>
                 <span className="pos">{r.kind === "item" ? pos : ""}</span>
                 <span className="nm">
                   <input
@@ -166,10 +236,34 @@ export function Review({ me, partners, draft, onBack }: { me: string; partners: 
             <div className="xs dim">{partnerName} owes you</div>
             <div className="amt owed num">{formatCents(owes)}</div>
           </div>
+          <button
+            type="button"
+            className={voice.state.k === "listening" ? "mic live" : "mic"}
+            aria-label={voice.state.k === "listening" ? "Stop and work out the split" : "Speak the split"}
+            aria-pressed={voice.state.k === "listening"}
+            disabled={voice.state.k === "working" || !rows.some((r) => r.kind === "item")}
+            onClick={() => {
+              if (undo) setUndo(null); // speaking again keeps the last change
+              setNote(null);
+              voice.toggle();
+            }}
+          >
+            <Icon name="mic" size={20} />
+          </button>
           <button type="button" className="btn sm" style={{ flex: "none" }} disabled title="Saving arrives with the next step">
             Save
           </button>
         </div>
+        {undo && (
+          <div className="row">
+            <button type="button" className="btn sm grow" onClick={() => settle(false)}>
+              Keep
+            </button>
+            <button type="button" className="btn ghost sm grow" onClick={() => settle(true)}>
+              Undo
+            </button>
+          </div>
+        )}
       </div>
     </main>
   );
@@ -217,5 +311,23 @@ function MoneyInput({
         setText(null);
       }}
     />
+  );
+}
+
+// What the voice call came back with, in the words of the approved flow (B6, E4).
+function Heard({ r }: { r: VoiceResult }) {
+  if (!r.ok) {
+    return <span className="xs">{r.error === "ai_paused" && r.until ? `Voice is paused until ${clock(r.until)}, use the sliders` : r.message}</span>;
+  }
+  return (
+    <>
+      <span className="dim xs">{r.changes.length || r.partner !== null ? "Heard:" : "Didn't catch any items - try again"}</span>
+      {r.transcript && <q>{r.transcript}</q>}
+      {r.dropped.length > 0 && (
+        <span className="xs">
+          No item {r.dropped.join(", ")} on this bill - left out
+        </span>
+      )}
+    </>
   );
 }

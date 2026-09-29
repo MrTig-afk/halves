@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { postReceipt } from "./api";
+import { postReceipt, postVoice } from "./api";
 
 type Reply = "network" | { status: number; body?: unknown; html?: boolean };
 
@@ -55,5 +55,23 @@ describe("postReceipt", () => {
     const calls = stub([{ status: 401, html: true }, { status: 200 }]);
     expect(await postReceipt(jpeg)).toMatchObject({ ok: false, error: "internal", retryable: false });
     expect(calls.n).toBe(1);
+  });
+});
+
+describe("postVoice", () => {
+  it("sends the audio with the item names and returns what was heard", async () => {
+    let sent: FormData | null = null;
+    vi.stubGlobal("fetch", async (_url: string, init: RequestInit) => {
+      sent = init.body as FormData;
+      return Response.json({ transcript: "t", changes: [{ item: 1, share: "split" }], dropped: [], partner: null });
+    });
+    const r = await postVoice(new Blob(["a"], { type: "audio/webm" }), ["MILK", "BREAD"]);
+    expect(r).toEqual({ ok: true, transcript: "t", changes: [{ item: 1, share: "split" }], dropped: [], partner: null });
+    expect(sent!.get("items")).toBe('["MILK","BREAD"]');
+  });
+
+  it("passes a paused-voice answer through with its time", async () => {
+    stub([{ status: 429, body: { error: "ai_paused", message: "m", retryable: false, until: "2026-09-29T10:00:00Z" } }]);
+    expect(await postVoice(new Blob(["a"]), ["MILK"])).toEqual({ ok: false, error: "ai_paused", message: "m", retryable: false, until: "2026-09-29T10:00:00Z" });
   });
 });

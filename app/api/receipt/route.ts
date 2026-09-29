@@ -1,14 +1,14 @@
 // POST /api/receipt - multipart field "file": a cropped receipt photo -> the lines the AI read.
 // Signed-in devices only: every read spends the shared free AI allowance.
-import { GeminiError, readReceipt } from "@/lib/gemini";
+import { GeminiError, pausedUntil, readReceipt } from "@/lib/gemini";
 import { ImageError, MAX_UPLOAD_BYTES, normaliseImage } from "@/lib/image";
 import { ReceiptError } from "@/lib/receipt";
 import { currentPerson } from "@/lib/session";
 
 export const maxDuration = 60;
 
-const fail = (status: number, error: string, message: string, retryable = false) =>
-  Response.json({ error, message, retryable }, { status });
+const fail = (status: number, error: string, message: string, retryable = false, until?: string) =>
+  Response.json({ error, message, retryable, ...(until && { until }) }, { status });
 
 export async function POST(req: Request) {
   if (!(await currentPerson())) return fail(401, "signed_out", "Sign in again to read receipts.");
@@ -39,7 +39,13 @@ export async function POST(req: Request) {
         : fail(502, "bad_output", "The receipt couldn't be read cleanly. Try again.", true);
     }
     if (e instanceof GeminiError) {
-      if (e.code === "quota") return fail(429, "ai_paused", "Receipt reading is paused - the free AI limit is used up. You can still enter this bill by hand.");
+      if (e.code === "quota") {
+        // userflow E4 for the daily limit; a per-minute limit clears within the minute, so it
+        // offers Try again.
+        return e.daily
+          ? fail(429, "ai_paused", "The free AI limit for today is used up. You can still enter this bill by hand, and your photo is kept.", false, pausedUntil(e))
+          : fail(429, "ai_paused", "The free AI limit is busy for a moment. Try again shortly, or enter this bill by hand.", true, pausedUntil(e));
+      }
       // Only a transient failure (5xx, timeout, network) is worth another try; a rejected
       // request or a missing key would fail the same way again.
       if (!e.transient) return fail(502, "unavailable", "Reading receipts isn't working right now.");

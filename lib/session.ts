@@ -3,6 +3,7 @@
 // the database is asked, and signing out deletes the row, so a copied cookie stops working.
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { cookies } from "next/headers";
+import { cache } from "react";
 import { query } from "./db";
 
 export const SESSION_COOKIE = "halves_session";
@@ -38,8 +39,9 @@ export function readSessionId(value: string | undefined): string | null {
   return want.length === got.length && timingSafeEqual(want, got) ? id : null;
 }
 
-// The signed-in person for this request (Server Components and route handlers).
-export async function currentPerson(): Promise<Person | null> {
+// The signed-in person for this request (Server Components and route handlers). cache() makes a
+// layout and its page share one lookup per render.
+export const currentPerson = cache(async (): Promise<Person | null> => {
   const id = readSessionId((await cookies()).get(SESSION_COOKIE)?.value);
   if (!id) return null;
   const rows = await query<Person>(
@@ -47,7 +49,7 @@ export async function currentPerson(): Promise<Person | null> {
     [id],
   );
   return rows[0] ?? null;
-}
+});
 
 export async function startSession(personId: number): Promise<void> {
   const rows = await query("insert into device_session (person_id) values ($1) returning id::text as id", [personId]);

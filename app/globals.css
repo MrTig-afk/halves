@@ -313,6 +313,10 @@ button {
   gap: 8px;
   padding: 8px 0;
   border-bottom: 1px solid var(--line);
+  transition: background 0.4s;
+}
+.it.flash {
+  background: var(--mint);
 }
 .it .pos {
   width: 18px;
@@ -624,4 +628,44 @@ input.plain[type="date"] {
     animation: none !important;
     transition: none !important;
   }
+}
+
+/* Voice split (B6) */
+.mic {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: var(--orange);
+  color: #fff;
+  display: grid;
+  place-items: center;
+  border: 0;
+  cursor: pointer;
+  flex: none;
+}
+.mic.live {
+  box-shadow: 0 0 0 6px rgba(255, 105, 44, 0.25);
+  animation: pulse 1s infinite;
+}
+.mic:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+@keyframes pulse {
+  50% {
+    box-shadow: 0 0 0 10px rgba(255, 105, 44, 0.12);
+  }
+}
+.voice {
+  border-radius: 12px;
+  background: var(--green-tint);
+  padding: 9px 11px;
+  font-size: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.voice q {
+  font-style: italic;
+  quotes: "\201C" "\201D";
 }
