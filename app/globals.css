@@ -326,6 +326,8 @@ button {
   flex: 1;
   min-width: 0;
   font-size: 13px;
+  display: flex;
+  flex-direction: column;
 }
 .it .pr {
   font-size: 13px;
@@ -369,6 +371,123 @@ button {
   color: #fff;
   font-weight: 700;
   cursor: pointer;
+}
+
+/* Review: 3-way share slider (mine / half / partner's), legend, inline editing */
+.grow {
+  flex: 1;
+  min-width: 0;
+}
+.s3 {
+  display: inline-block;
+  width: 66px;
+  height: 24px;
+  border-radius: 24px;
+  border: 0;
+  position: relative;
+  cursor: pointer;
+  flex: none;
+  background: var(--track-off);
+  transition: background 0.35s;
+  padding: 0;
+}
+.s3::after {
+  content: attr(data-k);
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #fff;
+  color: #373b3f;
+  font: 800 10px/20px var(--font);
+  text-align: center;
+  transition: transform 0.35s cubic-bezier(0.5, 1.6, 0.5, 1);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+}
+.s3[data-v="split"] {
+  background: var(--green);
+}
+.s3[data-v="split"]::after {
+  transform: translateX(21px);
+  color: var(--green-strong);
+}
+.s3[data-v="partner"] {
+  background: var(--partner);
+}
+.s3[data-v="partner"]::after {
+  transform: translateX(42px);
+  color: #6b4fb8;
+}
+.s3:focus-visible {
+  outline: 2px solid var(--orange);
+  outline-offset: 2px;
+}
+.s3.none {
+  visibility: hidden;
+}
+.legend {
+  display: flex;
+  font-size: 9px;
+  color: var(--dim);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  gap: 6px; /* sized to the names, so a long partner name never runs off the screen */
+  white-space: nowrap;
+}
+.center-y {
+  align-items: center;
+}
+.plain {
+  font: inherit;
+  color: inherit;
+  background: transparent;
+  border: 0;
+  padding: 2px 0;
+  min-width: 0;
+  width: 100%;
+  border-bottom: 1px dashed transparent;
+}
+.plain:focus {
+  outline: none;
+  border-bottom-color: var(--green);
+}
+.plain.b {
+  font-weight: 700;
+}
+select.plain,
+input.plain[type="date"] {
+  width: auto;
+  flex: none;
+}
+.it .pr.plain {
+  width: 72px;
+  text-align: right;
+  flex: none;
+}
+.remove {
+  align-self: flex-start;
+  background: none;
+  border: 0;
+  padding: 2px 0;
+  font: 700 11px var(--font);
+  color: var(--orange);
+}
+.owebar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.owebar .amt {
+  font-size: 18px;
+  font-weight: 800;
+}
+.btn:disabled {
+  opacity: 0.45;
+  cursor: default;
 }
 
 /* Sign-in tiles, PIN pad, lockout */
