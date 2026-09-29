@@ -1,6 +1,10 @@
 import type { Metadata, Viewport } from "next";
+import { Figtree } from "next/font/google";
 import { UpdatePrompt } from "@/components/UpdatePrompt";
 import "./globals.css";
+
+// Self-hosted at build time by next/font: no request to Google from the phone.
+const figtree = Figtree({ subsets: ["latin"], weight: ["400", "600", "700", "800"], variable: "--font-figtree" });
 
 export const metadata: Metadata = {
   title: "Halves",
@@ -23,7 +27,7 @@ export const viewport: Viewport = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en-AU">
+    <html lang="en-AU" className={figtree.variable}>
       <body>
         <UpdatePrompt />
         {children}
