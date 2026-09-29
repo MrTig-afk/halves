@@ -12,6 +12,7 @@ const STATUS: Record<string, number> = { invalid_pin: 400, not_found: 404, uncla
 
 export async function authResponse(personId: number, r: AuthResult): Promise<Response> {
   if (!r.ok) return Response.json(r, { status: STATUS[r.error] });
-  await startSession(personId);
+  // The PIN changed between the check and here (a reset, a new claim, Change PIN): no session.
+  if (!(await startSession(personId, r.stamp))) return Response.json({ ok: false, error: "changed" }, { status: 409 });
   return Response.json({ ok: true });
 }

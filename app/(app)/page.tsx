@@ -2,9 +2,12 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { BillItem } from "@/components/BillItem";
 import { Icon } from "@/components/Icon";
+import { InstallCard } from "@/components/InstallCard";
+import { NotifyPrompt } from "@/components/Notifications";
 import { SettleButton } from "@/components/SettleButton";
 import { formatCents } from "@/lib/money";
 import { firstName, initial, isToday, localDate, shortDate } from "@/lib/names";
+import { vapidPublicKey } from "@/lib/push";
 import { currentPerson } from "@/lib/session";
 import { openBills, rounds, tabs } from "@/lib/tab";
 
@@ -19,24 +22,32 @@ export default async function Home() {
 
   return (
     <main className="screen">
+      <NotifyPrompt publicKey={vapidPublicKey()} partner={partner} />
       <div className="bar">
         <Link href="/" className="logo">
           <span className="mark" />
           Halves
         </Link>
+        <Link href="/settings" className="gear" aria-label="Settings">
+          <Icon name="gear" />
+        </Link>
       </div>
       {bills.length === 0 && done.length === 0 ? (
-        <div className="center">
-          <div className="icon-art">
-            <span className="mark" style={{ width: 44, height: 44 }} />
+        <div className="body">
+          <InstallCard />
+          <div className="center">
+            <div className="icon-art">
+              <span className="mark" style={{ width: 44, height: 44 }} />
+            </div>
+            <b>No bills yet</b>
+            <span className="dim small">
+              Scan a receipt, crop it to the items and choose what&apos;s shared. It adds to your tab with {partner} until you settle up.
+            </span>
           </div>
-          <b>No bills yet</b>
-          <span className="dim small">
-            Scan a receipt, crop it to the items and choose what&apos;s shared. It adds to your tab with {partner} until you settle up.
-          </span>
         </div>
       ) : (
         <div className="body">
+          <InstallCard />
           {tabList.map((t) => {
             const name = firstName(t.partner);
             return (

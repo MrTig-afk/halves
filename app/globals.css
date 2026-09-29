@@ -19,8 +19,10 @@
   --crop-bg: #2b2f31;
   --font: var(--font-figtree), system-ui, sans-serif;
 }
+/* Dark follows the phone (System) unless this phone chose Light or Dark in Settings; the choice
+   is set on <html data-theme> before the first paint (app/layout.tsx). */
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     color-scheme: dark;
     --bg: #1b1f21;
     --fg: #e8ecea;
@@ -35,6 +37,21 @@
     --amber-tint: #3a3016;
     --track-off: #3a4145;
   }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #1b1f21;
+  --fg: #e8ecea;
+  --dim: #9aa4a1;
+  --line: #2d3337;
+  --soft: #24292c;
+  --green-strong: #1cc29f;
+  --green-tint: #173a33;
+  --mint: #1f4c42;
+  --orange-tint: #3a2419;
+  --amber: #e0a33a;
+  --amber-tint: #3a3016;
+  --track-off: #3a4145;
 }
 
 *,
@@ -812,6 +829,7 @@ input.plain[type="date"] {
    the bottom-sheet look, and let the backdrop be the scrim. */
 dialog.sheet {
   top: auto;
+  width: 100%; /* the browser sizes a dialog to its content; a bottom sheet spans the screen */
   margin: 0 auto;
   border: 0;
   padding: 0;
@@ -827,4 +845,80 @@ dialog.sheet::backdrop {
   flex-direction: column;
   gap: 10px;
   padding: 14px 14px calc(18px + env(safe-area-inset-bottom, 0px));
+}
+
+/* Settings (F1) */
+.gear {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: var(--soft);
+  border: 1px solid var(--line);
+  display: grid;
+  place-items: center;
+  color: var(--fg);
+  flex: none;
+  margin-left: auto;
+}
+.seg {
+  display: inline-flex;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: hidden;
+  font-size: 11px;
+  font-weight: 700;
+}
+.seg button {
+  border: 0;
+  background: none;
+  color: inherit;
+  padding: 5px 9px;
+  font: inherit;
+  cursor: pointer;
+}
+.seg button[aria-pressed="true"] {
+  background: var(--green);
+  color: #fff;
+}
+.linkrow {
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+.banner.ok {
+  background: var(--green-tint);
+  color: var(--green-strong);
+}
+
+/* Install card (A3) */
+.install {
+  border: 0;
+  width: 100%;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  flex: none;
+}
+.block {
+  display: block;
+}
+
+/* A5: a whole screen over Home, once (a modal dialog, so Home behind it is inert). */
+dialog.takeover {
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  max-height: none;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: var(--bg);
+  color: var(--fg);
+}
+dialog.takeover:not([open]) {
+  display: none;
 }

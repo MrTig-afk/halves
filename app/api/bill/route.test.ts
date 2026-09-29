@@ -1,8 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { currentPerson, query } = vi.hoisted(() => ({ currentPerson: vi.fn(), query: vi.fn() }));
+const { currentPerson, query, notifyLater, hasPush } = vi.hoisted(() => ({
+  currentPerson: vi.fn(),
+  query: vi.fn(),
+  notifyLater: vi.fn(),
+  hasPush: vi.fn(),
+}));
 vi.mock("@/lib/session", () => ({ currentPerson }));
 vi.mock("@/lib/db", () => ({ query }));
+vi.mock("@/lib/push", () => ({ notifyLater, hasPush }));
 const { POST } = await import("./route");
 
 const bill = {
@@ -26,6 +32,8 @@ const json = async (res: Response) => ({ status: res.status, ...(await res.json(
 
 beforeEach(() => {
   query.mockReset();
+  notifyLater.mockReset();
+  hasPush.mockResolvedValue(true);
   currentPerson.mockResolvedValue({ id: 1, name: "Kaushik", role: "admin" });
 });
 
@@ -46,6 +54,15 @@ describe("POST /api/bill", () => {
     expect(params.slice(0, 8)).toEqual([bill.scan_id, 1, 2, "Coles", "2026-09-29", 1000, 1000, 700]);
   });
 
+  it("tells the partner, with no amount or item in the message, and says so when they get notifications", async () => {
+    query.mockResolvedValueOnce([{ id: 5, photo_state: "none", was: 500 }]);
+    expect(await json(await post(bill))).toMatchObject({ notified: true });
+    expect(notifyLater).toHaveBeenCalledExactlyOnceWith(2, { title: "Kaushik added a bill", url: "/bill/5" });
+    hasPush.mockResolvedValueOnce(false);
+    query.mockResolvedValueOnce([{ id: 6, photo_state: "none", was: 500 }]);
+    expect(await json(await post(bill))).toMatchObject({ notified: false });
+  });
+
   it("answers a retried save with the bill stored the first time, not the retry's edits", async () => {
     query
       .mockRejectedValueOnce(Object.assign(new Error("duplicate key"), { code: "23505", constraint: "scan_request_pkey" }))
@@ -54,6 +71,8 @@ describe("POST /api/bill", () => {
     const r = await json(await post(bill)); // this retry says partner 2 / owes 700
     expect(r).toMatchObject({ status: 200, duplicate: true, partner_id: 3, owes: 450, description: "First try", was: 450, photo: "not_kept_full" });
     expect(query.mock.calls[2][1]).toEqual([1]); // the signed-in person's tabs; the stored partner's is picked
+    expect(notifyLater).not.toHaveBeenCalled(); // told once, by the first save
+    expect(hasPush).toHaveBeenCalledWith(3);
   });
 
   it("refuses a scan id another person already used", async () => {
