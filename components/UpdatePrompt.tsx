@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 
 // Registers the service worker and shows "A new version is ready" when a new
-// deploy's worker is waiting. Never reloads on its own (Artifact G3): only the
+// deploy's worker is waiting. Never reloads on its own: only the
 // tab whose Reload was tapped reloads; other tabs just get the banner.
 export function UpdatePrompt() {
   const [waiting, setWaiting] = useState<ServiceWorker | null>(null);

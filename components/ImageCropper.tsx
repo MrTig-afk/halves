@@ -1,7 +1,7 @@
 "use client";
 
 // Free-form 4-corner crop (ported from NutritionDE ImageCropper.jsx; pointer events cover
-// mouse and touch). Artifact B3: dark screen, white box with corner brackets,
+// mouse and touch). Dark screen, white box with corner brackets,
 // Cancel / Full image / Read items.
 import { useEffect, useRef, useState } from "react";
 import type { CropRect } from "@/lib/cropImage";

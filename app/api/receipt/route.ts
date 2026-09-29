@@ -1,18 +1,15 @@
 // POST /api/receipt - multipart field "file": a cropped receipt photo -> the lines the AI read.
-// M0: no session check yet (sign-in arrives in T1.1, which adds it to every route). Until
-// then the Vercel project must have Deployment Protection = Vercel Authentication on ALL
-// deployments (free on every plan per vercel.com/docs/deployment-protection, 2026-09-15),
-// set explicitly in T0.3 - it is not assumed to be on by default.
-import { GeminiError, readReceipt } from "@/lib/gemini";
+// Signed-in devices only: every read spends the shared free AI allowance.
+import { GeminiError, pausedUntil, readReceipt } from "@/lib/gemini";
 import { ImageError, MAX_UPLOAD_BYTES, normaliseImage } from "@/lib/image";
 import { ReceiptError } from "@/lib/receipt";
+import { fail } from "@/lib/http";
+import { currentPerson } from "@/lib/session";
 
 export const maxDuration = 60;
 
-const fail = (status: number, error: string, message: string, retryable = false) =>
-  Response.json({ error, message, retryable }, { status });
-
 export async function POST(req: Request) {
+  if (!(await currentPerson())) return fail(401, "signed_out", "Sign in again to read receipts.");
   const declared = Number(req.headers.get("content-length") ?? 0);
   if (declared > MAX_UPLOAD_BYTES + 64 * 1024) return fail(413, "image_too_large", "That photo is too big. Crop it or use a smaller one.");
 
@@ -40,7 +37,13 @@ export async function POST(req: Request) {
         : fail(502, "bad_output", "The receipt couldn't be read cleanly. Try again.", true);
     }
     if (e instanceof GeminiError) {
-      if (e.code === "quota") return fail(429, "ai_paused", "Receipt reading is paused - the free AI limit is used up. You can still enter this bill by hand.");
+      if (e.code === "quota") {
+        // The daily limit lasts until midnight Pacific; a per-minute limit clears within the minute, so it
+        // offers Try again.
+        return e.daily
+          ? fail(429, "ai_paused", "The free AI limit for today is used up. You can still enter this bill by hand, and your photo is kept.", false, pausedUntil(e))
+          : fail(429, "ai_paused", "The free AI limit is busy for a moment. Try again shortly, or enter this bill by hand.", true, pausedUntil(e));
+      }
       // Only a transient failure (5xx, timeout, network) is worth another try; a rejected
       // request or a missing key would fail the same way again.
       if (!e.transient) return fail(502, "unavailable", "Reading receipts isn't working right now.");

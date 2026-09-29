@@ -1,6 +1,7 @@
-// Gemini over plain fetch (no SDK). Free tier only (PRD 10.1): a 429 is the cost cap and is
+// Gemini over plain fetch (no SDK). Free tier only: a 429 is the cost cap and is
 // never retried. Primary model chosen in M0 by timing real reads (3.5 s vs 6.0 s on the sample).
 import { parseReceipt, RECEIPT_PROMPT, RECEIPT_SCHEMA, type ReceiptReading } from "./receipt";
+import { parseVoice, VOICE_SCHEMA, voicePrompt, type VoiceReading } from "./voice";
 
 export const PRIMARY_MODEL = "gemini-3.5-flash-lite";
 export const FALLBACK_MODEL = "gemini-2.5-flash";
@@ -11,6 +12,8 @@ export class GeminiError extends Error {
     readonly code: "quota" | "unavailable" | "timeout",
     message: string,
     readonly transient = false, // worth asking the same model again (5xx, timeout, network)
+    readonly retryAfterS?: number, // on a 429: how long Google says to wait, when it says
+    readonly daily = false, // on a 429: the per-day allowance is used up, not the per-minute one
   ) {
     super(message);
   }
@@ -30,7 +33,10 @@ async function call(model: string, parts: Part[], schema: object, deps: Required
       }),
       signal: AbortSignal.timeout(TIMEOUT_MS),
     });
-    if (res.status === 429) throw new GeminiError("quota", "free AI limit reached");
+    if (res.status === 429) {
+      const { seconds, daily } = await quotaWait(res);
+      throw new GeminiError("quota", `${model}: free AI limit reached`, false, seconds, daily);
+    }
     if (!res.ok) throw new GeminiError("unavailable", `${model} returned ${res.status}`, res.status >= 500);
     const body = await res.json(); // the body read is inside the try: a timeout or bad JSON here is handled too
     return body?.candidates?.[0]?.content?.parts?.map((p: { text?: string }) => p.text ?? "").join("") ?? "";
@@ -43,8 +49,35 @@ async function call(model: string, parts: Part[], schema: object, deps: Required
   }
 }
 
+// How long until the free tier answers again, in seconds, or undefined when the 429 does not say.
+// A per-day quota resets at midnight Pacific time; its RetryInfo only covers the next minute.
+async function quotaWait(res: Response, now = new Date()): Promise<{ seconds?: number; daily: boolean }> {
+  const body = await res.json().catch(() => null);
+  const details: Record<string, unknown>[] = Array.isArray(body?.error?.details) ? body.error.details : [];
+  const daily = details.some((d) => Array.isArray(d?.violations) && d.violations.some((v: { quotaId?: unknown }) => /PerDay/i.test(String(v?.quotaId))));
+  if (daily) return { seconds: untilPacificMidnight(now), daily };
+  for (const d of details) {
+    const m = /^(\d+(?:\.\d+)?)s$/.exec(String(d?.retryDelay ?? ""));
+    if (m) return { seconds: Math.min(Math.ceil(Number(m[1])), 86_400), daily };
+  }
+  return { daily };
+}
+
+// Reads the Pacific clock once, so on a daylight-saving change night it can be an hour off.
+export function untilPacificMidnight(now: Date): number {
+  const [h, m, s] = new Intl.DateTimeFormat("en-US", { timeZone: "America/Los_Angeles", hourCycle: "h23", hour: "2-digit", minute: "2-digit", second: "2-digit" })
+    .format(now)
+    .split(":")
+    .map(Number);
+  return 86_400 - (h * 3600 + m * 60 + s);
+}
+
+// The moment a paused AI feature works again, for "paused until <time>".
+export const pausedUntil = (e: GeminiError) => (e.retryAfterS ? new Date(Date.now() + e.retryAfterS * 1000).toISOString() : undefined);
+
 // Primary twice only for transient failures (5xx, timeout, network), then the fallback once;
-// a 4xx other than 429 skips straight to the fallback. Quota stops everything at once.
+// a 4xx other than 429 skips straight to the fallback. A per-minute quota stops everything at
+// once; a per-day quota is per model, so the fallback's own free allowance gets one try.
 export async function generateJson(parts: Part[], schema: object, deps: Deps = {}): Promise<{ text: string; model: string }> {
   const d: Required<Deps> = {
     fetch: deps.fetch ?? fetch,
@@ -56,7 +89,7 @@ export async function generateJson(parts: Part[], schema: object, deps: Deps = {
     try {
       return { text: await call(PRIMARY_MODEL, parts, schema, d), model: PRIMARY_MODEL };
     } catch (e) {
-      if (!(e instanceof GeminiError) || e.code === "quota") throw e;
+      if (!(e instanceof GeminiError) || (e.code === "quota" && !e.daily)) throw e;
       if (!e.transient) break;
       if (attempt === 0) await d.sleep(500);
     }
@@ -71,4 +104,13 @@ export async function readReceipt(jpeg: Buffer, deps: Deps = {}): Promise<{ read
     deps,
   );
   return { reading: parseReceipt(text), model };
+}
+
+export async function readVoice(audio: Buffer, mime: string, items: string[], deps: Deps = {}): Promise<{ reading: VoiceReading; model: string }> {
+  const { text, model } = await generateJson(
+    [{ inline_data: { mime_type: mime, data: audio.toString("base64") } }, { text: voicePrompt(items) }],
+    VOICE_SCHEMA,
+    deps,
+  );
+  return { reading: parseVoice(text, items.length), model };
 }
