@@ -1,17 +1,16 @@
 import Link from "next/link";
-import { notFound, redirect } from "next/navigation";
+import { notFound } from "next/navigation";
 import { PhotoThumb } from "@/components/PhotoThumb";
 import { formatCents, plainCents } from "@/lib/money";
 import { firstName, localDate, shortDate } from "@/lib/names";
-import { currentPerson } from "@/lib/session";
+import { requirePerson } from "@/lib/session";
 import { bill as loadBill, idParam, type BillLine } from "@/lib/tab";
 
 export const metadata = { title: "Bill - Halves" };
 
 // A saved bill, read-only for both people, open or settled: there is no Edit and no Delete.
 export default async function BillPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ from?: string }> }) {
-  const me = await currentPerson();
-  if (!me) redirect("/signin");
+  const me = await requirePerson(); // checked here too: on an in-app navigation only the page renders
   const id = idParam((await params).id);
   const b = id === null ? null : await loadBill(id, me.id);
   // The same 404 for a bill that does not exist and one that is not yours, so nothing leaks.

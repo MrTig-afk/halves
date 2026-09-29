@@ -2,6 +2,7 @@
 // rounds. Every query is scoped to the signed-in person: a bill or round is only ever read by
 // its payer or its partner.
 import { query } from "./db";
+import { ID_RE } from "./paths";
 import type { LineKind } from "./receipt";
 import type { Share } from "./split";
 
@@ -35,14 +36,9 @@ export type Bill = BillRow & {
   lines: BillLine[];
 };
 
-// The tab between two people, as a SQL expression: $1 = me, $2 = the other person.
-export const TAB_BALANCE = `
-  select coalesce(sum(case when payer_id = $1 then partner_owes_cents else -partner_owes_cents end), 0)::int as balance,
-         count(*)::int as open
-  from bill where settlement_id is null
-    and ((payer_id = $1 and partner_id = $2) or (payer_id = $2 and partner_id = $1))`;
-
-// One tab per other person, even with nothing open yet.
+// One tab per other person, even with nothing open yet. The same balance sum is also written
+// inside two statements that must compute it on their own rows: saving a bill (the tab just
+// before it, in the save's snapshot) and settleAll (exactly the rows it locks).
 export const tabs = (me: number) =>
   query<Tab>(
     `select p.id::int as partner_id, p.name as partner,
@@ -108,7 +104,7 @@ export async function bill(id: number, me: number): Promise<Bill | null> {
 }
 
 // A route or page id: digits only, or it is simply not found.
-export const idParam = (s: string) => (/^\d{1,15}$/.test(s) ? Number(s) : null);
+export const idParam = (s: string) => (ID_RE.test(s) ? Number(s) : null);
 
 // Settle all between me and one other person, in one statement. The open bills are locked, the
 // balance is worked out from exactly those rows, and they are all stamped with the new

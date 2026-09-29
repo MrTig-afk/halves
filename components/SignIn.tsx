@@ -25,14 +25,14 @@ async function send(path: string, personId: number, pin: string): Promise<Answer
 }
 
 
-export function SignIn({ tiles }: { tiles: Tile[] }) {
-  const router = useRouter();
+export function SignIn({ tiles, next }: { tiles: Tile[]; next: string }) {
+  const router = useRouter(); // next: Home, or a deep link the page already checked
   const [step, setStep] = useState<Step>({ k: "tiles" });
   const [busy, setBusy] = useState(false);
 
   const open = (tile: Tile) => setStep(tile.claimed ? { k: "pin", tile } : { k: "set", tile });
   const signedIn = () => {
-    router.replace("/");
+    router.replace(next);
     router.refresh();
   };
 

@@ -9,7 +9,7 @@ import { fail } from "@/lib/http";
 import { ImageError, MAX_UPLOAD_BYTES, normaliseImage } from "@/lib/image";
 import { currentPerson } from "@/lib/session";
 import { partnerOwes } from "@/lib/split";
-import { TAB_BALANCE } from "@/lib/tab";
+import { tabs } from "@/lib/tab";
 
 export const maxDuration = 30;
 
@@ -111,8 +111,8 @@ export async function POST(req: Request) {
     const [stored] = await query<Omit<Saved, "duplicate" | "was">>(STORED, [bill.scan_id, me.id]);
     // A scan id used by the other person is refused.
     if (!stored) return fail(409, "conflict", "This bill couldn't be saved. Scan it again.");
-    const [tab] = await query<{ balance: number }>(TAB_BALANCE, [me.id, stored.partner_id]);
-    saved = { duplicate: true, ...stored, was: tab.balance - stored.owes };
+    const balance = (await tabs(me.id)).find((t) => t.partner_id === stored.partner_id)?.balance ?? 0;
+    saved = { duplicate: true, ...stored, was: balance - stored.owes };
   }
   console.info(JSON.stringify({ event: saved.duplicate ? "bill_duplicate" : "bill_saved", lines: bill.lines.length, photo: saved.photo }));
   return Response.json(saved);
