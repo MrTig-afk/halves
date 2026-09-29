@@ -50,10 +50,10 @@ describe("POST /api/bill", () => {
     query
       .mockRejectedValueOnce(Object.assign(new Error("duplicate key"), { code: "23505", constraint: "scan_request_pkey" }))
       .mockResolvedValueOnce([{ partner_id: 3, owes: 450, description: "First try", photo: "not_kept_full" }])
-      .mockResolvedValueOnce([{ balance: 900 }]);
+      .mockResolvedValueOnce([{ partner_id: 3, partner: "P", balance: 900, open: 2 }]);
     const r = await json(await post(bill)); // this retry says partner 2 / owes 700
     expect(r).toMatchObject({ status: 200, duplicate: true, partner_id: 3, owes: 450, description: "First try", was: 450, photo: "not_kept_full" });
-    expect(query.mock.calls[2][1]).toEqual([1, 3]); // the tab is the stored partner's
+    expect(query.mock.calls[2][1]).toEqual([1]); // the signed-in person's tabs; the stored partner's is picked
   });
 
   it("refuses a scan id another person already used", async () => {

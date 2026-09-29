@@ -1,17 +1,16 @@
 import Link from "next/link";
-import { notFound, redirect } from "next/navigation";
+import { notFound } from "next/navigation";
 import { BillItem } from "@/components/BillItem";
 import { formatCents } from "@/lib/money";
 import { firstName, localDate, shortDate } from "@/lib/names";
-import { currentPerson } from "@/lib/session";
+import { requirePerson } from "@/lib/session";
 import { idParam, round as loadRound } from "@/lib/tab";
 
 export const metadata = { title: "Settled - Halves" };
 
 // One settled round and the bills it cleared.
 export default async function SettledPage({ params }: { params: Promise<{ id: string }> }) {
-  const me = await currentPerson();
-  if (!me) redirect("/signin");
+  const me = await requirePerson(); // checked here too: on an in-app navigation only the page renders
   const id = idParam((await params).id);
   const found = id === null ? null : await loadRound(id, me.id);
   if (!found) notFound();

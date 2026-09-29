@@ -9,7 +9,13 @@ import { beforeAll, describe, expect, it, vi } from "vitest";
 import type { Person } from "./session";
 
 const who = vi.hoisted(() => ({ current: null as Person | null }));
-vi.mock("@/lib/session", () => ({ currentPerson: async () => who.current }));
+vi.mock("@/lib/session", () => ({
+  currentPerson: async () => who.current,
+  requirePerson: async () => {
+    if (!who.current) throw new Error("signed out"); // every test here signs someone in first
+    return who.current;
+  },
+}));
 
 const live = !!process.env.DATABASE_URL;
 
