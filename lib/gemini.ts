@@ -1,4 +1,4 @@
-// Gemini over plain fetch (no SDK). Free tier only (PRD 10.1): a 429 is the cost cap and is
+// Gemini over plain fetch (no SDK). Free tier only: a 429 is the cost cap and is
 // never retried. Primary model chosen in M0 by timing real reads (3.5 s vs 6.0 s on the sample).
 import { parseReceipt, RECEIPT_PROMPT, RECEIPT_SCHEMA, type ReceiptReading } from "./receipt";
 

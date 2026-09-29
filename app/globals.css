@@ -206,7 +206,7 @@ button {
   color: var(--amber);
 }
 
-/* Bottom sheet (B2) */
+/* Bottom sheet: take photo / choose from photos */
 .scrim {
   position: fixed;
   inset: 0;
@@ -237,7 +237,7 @@ button {
   align-self: center;
 }
 
-/* Crop (B3) - always dark */
+/* Crop - always dark */
 .crop-screen {
   background: var(--crop-bg);
   color: #fff;
@@ -266,7 +266,7 @@ button {
   touch-action: none;
 }
 
-/* Reading (B4) */
+/* Reading the receipt */
 .prog {
   height: 6px;
   border-radius: 6px;
@@ -302,7 +302,7 @@ button {
   }
 }
 
-/* Item list (B5, read-only in M0) */
+/* Item list */
 .items {
   display: flex;
   flex-direction: column;
@@ -345,7 +345,7 @@ button {
   padding: 7px 10px;
 }
 
-/* In the page flow, not over the header (Artifact G3). */
+/* In the page flow, never over the header. */
 .update-prompt {
   max-width: 460px;
   margin: calc(10px + env(safe-area-inset-top, 0px)) auto 0;
@@ -368,6 +368,133 @@ button {
   background: var(--green);
   color: #fff;
   font-weight: 700;
+  cursor: pointer;
+}
+
+/* Sign-in tiles, PIN pad, lockout */
+.me {
+  font-size: 11px;
+  color: var(--dim);
+  text-align: center;
+}
+.owed {
+  color: var(--green);
+  font-weight: 700;
+}
+.owe {
+  color: var(--orange);
+}
+.signin-head {
+  justify-content: flex-start;
+  padding-top: calc(46px + env(safe-area-inset-top, 0px));
+}
+.tiles {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  width: 100%;
+  margin-top: 14px;
+}
+.tile {
+  border: 1.5px solid var(--line);
+  border-radius: 14px;
+  padding: 14px 8px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  background: var(--bg);
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 13px;
+}
+.tile.new {
+  border-style: dashed;
+  border-color: var(--green);
+}
+.tile:focus-visible,
+.key:focus-visible {
+  outline: 2px solid var(--orange);
+  outline-offset: 2px;
+}
+.av {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-weight: 800;
+  font-size: 13px;
+  color: #fff;
+  background: var(--partner);
+  flex: none;
+}
+.av[data-admin] {
+  background: #373b3f;
+}
+.av[data-new] {
+  background: #c9d1cf;
+  color: #5b6468;
+}
+.av.big {
+  width: 46px;
+  height: 46px;
+  font-size: 18px;
+}
+.pin-head {
+  flex: none;
+  justify-content: flex-start;
+  padding-top: 24px;
+  gap: 6px;
+}
+.dots {
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+  margin: 14px 0 4px;
+}
+.dots i {
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  border: 2px solid var(--fg);
+  display: block;
+}
+.dots i.on {
+  background: var(--fg);
+}
+.shake {
+  animation: shake 0.35s;
+}
+@keyframes shake {
+  25% {
+    transform: translateX(-7px);
+  }
+  50% {
+    transform: translateX(6px);
+  }
+  75% {
+    transform: translateX(-3px);
+  }
+}
+.pin-msg {
+  text-align: center;
+  min-height: 18px;
+}
+.pad {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  padding: 16px 24px calc(24px + env(safe-area-inset-bottom, 0px));
+  margin-top: auto;
+}
+.key {
+  font-weight: 600;
+  font-size: 19px;
+  background: var(--soft);
+  border: 0;
+  border-radius: 12px;
+  padding: 12px 0;
   cursor: pointer;
 }
 

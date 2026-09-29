@@ -1,11 +1,11 @@
-// The ONLY way uploaded bytes become an image Halves stores or sends to Gemini (PRD 6.4, 10.3):
+// The ONLY way uploaded bytes become an image Halves stores or sends to Gemini:
 // sniff the real format, allowlist it, cap pixels before decoding, then re-encode to a fresh
 // JPEG with no EXIF / location / ICC. The original bytes are never passed on.
 import sharp from "sharp";
 
 export const MAX_UPLOAD_BYTES = 4 * 1024 * 1024; // Vercel's request limit is 4.5 MB, multipart included
 export const MAX_PIXELS = 30_000_000;
-export const MAX_SIDE = 2048; // receipt print is small; tuned in M0
+export const MAX_SIDE = 2048; // receipt print is small; tune against real phone photos
 
 export type ImageFormat = "jpeg" | "png" | "webp" | "heif";
 

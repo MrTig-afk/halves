@@ -1,7 +1,7 @@
 // Client calls. The ONLY automatic retry is a request that never reached the server (a
 // network error): the server already retries Gemini itself, so retrying anything else would
 // multiply free-tier calls. Every other failure is shown, and `retryable` tells the UI to
-// offer Try again (PRD 7.1).
+// offer Try again.
 import type { ReceiptReading } from "./receipt";
 
 export type ApiFailure = { error: string; message: string; retryable: boolean };

@@ -1,11 +1,9 @@
 // POST /api/receipt - multipart field "file": a cropped receipt photo -> the lines the AI read.
-// M0: no session check yet (sign-in arrives in T1.1, which adds it to every route). Until
-// then the Vercel project must have Deployment Protection = Vercel Authentication on ALL
-// deployments (free on every plan per vercel.com/docs/deployment-protection, 2026-09-15),
-// set explicitly in T0.3 - it is not assumed to be on by default.
+// Signed-in devices only: every read spends the shared free AI allowance.
 import { GeminiError, readReceipt } from "@/lib/gemini";
 import { ImageError, MAX_UPLOAD_BYTES, normaliseImage } from "@/lib/image";
 import { ReceiptError } from "@/lib/receipt";
+import { currentPerson } from "@/lib/session";
 
 export const maxDuration = 60;
 
@@ -13,6 +11,7 @@ const fail = (status: number, error: string, message: string, retryable = false)
   Response.json({ error, message, retryable }, { status });
 
 export async function POST(req: Request) {
+  if (!(await currentPerson())) return fail(401, "signed_out", "Sign in again to read receipts.");
   const declared = Number(req.headers.get("content-length") ?? 0);
   if (declared > MAX_UPLOAD_BYTES + 64 * 1024) return fail(413, "image_too_large", "That photo is too big. Crop it or use a smaller one.");
 

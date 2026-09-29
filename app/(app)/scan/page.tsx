@@ -1,7 +1,7 @@
 "use client";
 
-// M0 receipt chain (tasks T0.5): pick a photo -> crop -> AI read -> the lines it read.
-// Artifact B2-B4 and E3/E4. The full review screen (sliders, voice, Save) is T1.3.
+// Pick a photo -> crop -> AI read -> the lines it read, with the no-items and
+// paused-AI error screens. Choosing each item's share and saving come next.
 import Link from "next/link";
 import { useRef, useState } from "react";
 import { Icon } from "@/components/Icon";
@@ -39,6 +39,7 @@ export default function Scan() {
       return;
     }
     const r = await postReceipt(jpeg);
+    if (!r.ok && r.error === "signed_out") return window.location.assign("/signin");
     setStep(r.ok ? { k: "result", reading: r.reading } : { k: "failed", img, rect, failure: r });
   };
 
