@@ -1,0 +1,48 @@
+# secrets - never gated, never negotiable
+.env
+.env.*
+!.env.example
+*.local
+*.pem
+*.key
+
+# machine junk
+node_modules/
+.next/
+out/
+build/
+dist/
+coverage/
+*.tsbuildinfo
+next-env.d.ts
+.vercel/
+.idea/
+.vscode/*
+!.vscode/launch.json
+!.vscode/tasks.json
+!.vscode/extensions.json
+
+# real receipts and voice clips (owner's scans, PRD 11) - never committed
+fixtures/private/
+
+# code review graph
+.code-review-graph/
+.mcp.json
+
+# local-only working material - internal tooling, never published
+CLAUDE.md
+START-HERE.md
+RUNBOOK.md
+HANDOFF.md
+.claude/
+.pipeline/
+assets/
+design/
+social-media/
+portfolio/
+project_summary.txt
+docs/internal/
+*.tex
+
+# browser automation output
+.playwright-mcp/
