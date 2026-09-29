@@ -53,6 +53,11 @@ export const currentPerson = cache(async (): Promise<Person | null> => {
   return rows[0] ?? null;
 });
 
+// This device's session id, if its cookie is genuine (the row may still be gone).
+export async function currentSessionId(): Promise<string | null> {
+  return readSessionId((await cookies()).get(SESSION_COOKIE)?.value);
+}
+
 export async function startSession(personId: number): Promise<void> {
   const rows = await query("insert into device_session (person_id) values ($1) returning id::text as id", [personId]);
   (await cookies()).set(SESSION_COOKIE, signSession(rows[0].id as string), SESSION_COOKIE_OPTIONS);

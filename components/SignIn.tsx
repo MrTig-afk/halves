@@ -111,7 +111,7 @@ export function SignIn({ tiles, next }: { tiles: Tile[]; next: string }) {
   );
 }
 
-function PinPad({ busy, shake, message, onDone }: { busy: boolean; shake: boolean; message?: string; onDone: (pin: string) => void }) {
+export function PinPad({ busy, shake, message, onDone }: { busy: boolean; shake: boolean; message?: string; onDone: (pin: string) => void }) {
   const [pin, setPin] = useState("");
   const press = (k: string) => {
     if (busy) return;

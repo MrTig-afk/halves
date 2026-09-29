@@ -91,6 +91,9 @@ CREATE TABLE IF NOT EXISTS receipt_photo (
   created_at   timestamptz NOT NULL DEFAULT now()
 );
 
+-- Tile names are unique whatever the letter case, so "rahul" can never sit beside "Rahul".
+CREATE UNIQUE INDEX IF NOT EXISTS person_name_lower ON person (lower(name));
+
 -- A bill is settled once and stays settled: settlement_id may go from null to a round, never
 -- back to null and never to another round. The grants below allow updating the column at all;
 -- this is what makes that update one-way.

@@ -24,6 +24,9 @@ export default async function Home() {
           <span className="mark" />
           Halves
         </Link>
+        <Link href="/settings" className="gear" aria-label="Settings">
+          <Icon name="gear" />
+        </Link>
       </div>
       {bills.length === 0 && done.length === 0 ? (
         <div className="center">
