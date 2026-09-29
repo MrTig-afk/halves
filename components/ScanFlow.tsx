@@ -208,6 +208,7 @@ function Saved({ s, again, done }: { s: SavedBill; again: () => void; done: () =
           <div className={`num tab-amt ${now >= 0 ? "owed" : "owe"}`}>{tab(now)}</div>
           <div className="xs dim num">was {s.was >= 0 ? formatCents(s.was) : tab(s.was)}</div>
         </div>
+        {s.notified && <span className="dim xs">{s.partnerName} has been notified.</span>}
         {s.photo === "not_kept_full" && <span className="dim xs">Photo not kept: photo storage is full. Export photos in Settings to free space.</span>}
       </div>
       <div className="foot">

@@ -1,8 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { currentPerson, settleAll } = vi.hoisted(() => ({ currentPerson: vi.fn(), settleAll: vi.fn() }));
+const { currentPerson, settleAll, notifyLater } = vi.hoisted(() => ({ currentPerson: vi.fn(), settleAll: vi.fn(), notifyLater: vi.fn() }));
 vi.mock("@/lib/session", () => ({ currentPerson }));
 vi.mock("@/lib/tab", () => ({ settleAll }));
+vi.mock("@/lib/push", () => ({ notifyLater }));
 const { POST } = await import("./route");
 
 const post = (body: unknown) => POST(new Request("http://x/api/settle", { method: "POST", body: typeof body === "string" ? body : JSON.stringify(body) }));
@@ -31,6 +32,7 @@ describe("POST /api/settle", () => {
     const res = await post({ partner_id: 2, expected: 3060 });
     expect(await res.json()).toMatchObject({ id: 7, amount_cents: 3060, bills: 4 });
     expect(settleAll).toHaveBeenCalledWith(1, 2, 3060);
+    expect(notifyLater).toHaveBeenCalledExactlyOnceWith(2, { title: "Kaushik settled up - $30.60", url: "/" });
   });
 
   it("settles nothing and returns the new balance when the tab changed since the sheet opened", async () => {
@@ -38,5 +40,6 @@ describe("POST /api/settle", () => {
     const res = await post({ partner_id: 2, expected: 3060 });
     expect(res.status).toBe(409);
     expect(await res.json()).toEqual({ error: "changed", balance: 5060 });
+    expect(notifyLater).not.toHaveBeenCalled();
   });
 });

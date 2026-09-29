@@ -41,6 +41,10 @@ CREATE TABLE IF NOT EXISTS push_subscription (
   auth        text        NOT NULL,
   created_at  timestamptz NOT NULL DEFAULT now()
 );
+-- A subscription belongs to the phone's signed-in session: signing out, a PIN change or a PIN reset
+-- deletes the session and with it that phone's notifications.
+ALTER TABLE push_subscription ADD COLUMN IF NOT EXISTS session_id uuid REFERENCES device_session(id) ON DELETE CASCADE;
+ALTER TABLE push_subscription ALTER COLUMN session_id SET NOT NULL;
 
 CREATE TABLE IF NOT EXISTS bill (
   id                    bigint      GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
@@ -91,6 +95,17 @@ CREATE TABLE IF NOT EXISTS receipt_photo (
   created_at   timestamptz NOT NULL DEFAULT now()
 );
 
+-- Tile names are unique whatever the letter case, so "rahul" can never sit beside "Rahul".
+CREATE UNIQUE INDEX IF NOT EXISTS person_name_lower ON person (lower(name));
+
+-- Which PIN a session was signed in with. Every PIN change (claim, admin reset, Change PIN) gives
+-- the person a new stamp, and a session counts only while it carries the current one - so a
+-- sign-in that checked a PIN just before it changed writes a stale stamp and signs no one in.
+ALTER TABLE person ADD COLUMN IF NOT EXISTS pin_stamp uuid NOT NULL DEFAULT gen_random_uuid();
+ALTER TABLE device_session ADD COLUMN IF NOT EXISTS pin_stamp uuid;
+UPDATE device_session s SET pin_stamp = p.pin_stamp FROM person p WHERE s.person_id = p.id AND s.pin_stamp IS NULL;
+ALTER TABLE device_session ALTER COLUMN pin_stamp SET NOT NULL;
+
 -- A bill is settled once and stays settled: settlement_id may go from null to a round, never
 -- back to null and never to another round. The grants below allow updating the column at all;
 -- this is what makes that update one-way.
@@ -118,6 +133,7 @@ BEGIN
     GRANT SELECT, INSERT, UPDATE         ON person            TO halves_app;
     GRANT SELECT, INSERT, UPDATE, DELETE ON device_session    TO halves_app;
     GRANT SELECT, INSERT, DELETE         ON push_subscription TO halves_app;
+    GRANT UPDATE (person_id, session_id, p256dh, auth) ON push_subscription TO halves_app;
     GRANT SELECT, INSERT                 ON bill              TO halves_app;
     GRANT UPDATE (settlement_id, photo_state) ON bill         TO halves_app;
     GRANT SELECT, INSERT                 ON line_item         TO halves_app;

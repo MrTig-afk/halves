@@ -3,6 +3,9 @@
 // (`expected`, signed from their side). Otherwise nothing is settled and the new balance is
 // returned (409) to confirm again.
 import { fail } from "@/lib/http";
+import { formatCents } from "@/lib/money";
+import { firstName } from "@/lib/names";
+import { notifyLater } from "@/lib/push";
 import { currentPerson } from "@/lib/session";
 import { settleAll } from "@/lib/tab";
 
@@ -21,5 +24,6 @@ export async function POST(req: Request) {
   const r = await settleAll(me.id, other, expected);
   console.info(JSON.stringify({ event: r.id ? "settled" : r.balance !== expected ? "settle_changed" : "nothing_to_settle", bills: r.bills }));
   if (!r.id && r.balance !== expected) return Response.json({ error: "changed", balance: r.balance }, { status: 409 });
+  if (r.id) notifyLater(other, { title: `${firstName(me.name)} settled up - ${formatCents(r.amount_cents)}`, url: "/" });
   return Response.json(r);
 }
