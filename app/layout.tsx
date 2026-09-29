@@ -39,6 +39,12 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   const theme = readTheme((await cookies()).get(THEME_COOKIE)?.value);
   return (
     <html lang="en-AU" className={figtree.variable} data-theme={theme === "system" ? undefined : theme}>
+      <head>
+        {/* Chrome's install prompt can arrive before any app code runs: keep it for the Home card. */}
+        <script
+          dangerouslySetInnerHTML={{ __html: 'addEventListener("beforeinstallprompt",function(e){e.preventDefault();window.__bip=e})' }}
+        />
+      </head>
       <body>
         <UpdatePrompt />
         {children}

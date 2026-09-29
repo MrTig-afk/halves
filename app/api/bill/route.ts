@@ -7,15 +7,12 @@ import { query } from "@/lib/db";
 import { BillError, parseBill, type NewBill, type Saved } from "@/lib/bill";
 import { fail } from "@/lib/http";
 import { ImageError, MAX_UPLOAD_BYTES, normaliseImage } from "@/lib/image";
+import { PHOTO_CAP_BYTES } from "@/lib/photos";
 import { currentPerson } from "@/lib/session";
 import { partnerOwes } from "@/lib/split";
 import { tabs } from "@/lib/tab";
 
 export const maxDuration = 30;
-
-// Photos are kept only while the database is under 400 MB, so they can never fill the free
-// 0.5 GB and stop bills from saving.
-const PHOTO_CAP_BYTES = 400 * 1024 * 1024;
 
 const SAVE = `
   with p as (select id from person where id = $3 and id <> $2),
@@ -51,7 +48,6 @@ const STORED = `
   select b.partner_id::int as partner_id, b.partner_owes_cents as owes, b.description, b.photo_state as photo
   from scan_request s join bill b on b.id = s.bill_id
   where s.scan_id = $1 and s.person_id = $2`;
-
 
 export async function POST(req: Request) {
   const me = await currentPerson();
