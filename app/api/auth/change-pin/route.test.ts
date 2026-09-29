@@ -40,18 +40,20 @@ describe("POST /api/auth/change-pin", () => {
   });
 
   it("stores a hash of the new PIN and signs out the person's other phones, keeping this one", async () => {
-    checkPin.mockResolvedValueOnce({ ok: true });
+    checkPin.mockResolvedValueOnce({ ok: true, stamp: "stamp-1" });
     query.mockResolvedValueOnce([{ changed: true }]);
     expect((await post({ current: "1111", next: "2222" })).status).toBe(200);
-    const [sql, [id, hash, keep]] = query.mock.calls[0];
-    expect(sql).toMatch(/update person set pin_hash = \$2\s+where id = \$1 and exists \(select 1 from device_session where person_id = \$1 and id::text = \$3\)/);
-    expect(sql).toMatch(/delete from device_session where person_id in \(select id from p\) and id::text <> coalesce\(\$3/);
-    expect([id, keep]).toEqual([4, "sess-1"]);
+    const [sql, [id, hash, keep, stamp]] = query.mock.calls[0];
+    // only while the PIN is still the one just checked
+    expect(sql).toMatch(/update person set pin_hash = \$2, pin_stamp = gen_random_uuid\(\)\s+where id = \$1 and pin_stamp = \$4::uuid/);
+    expect(sql).toMatch(/update device_session d set pin_stamp = p.pin_stamp from p where d.id = \$3::uuid/); // this phone stays signed in
+    expect(sql).toMatch(/delete from device_session d using p where d.person_id = p.id and d.id is distinct from \$3::uuid/);
+    expect([id, keep, stamp]).toEqual([4, "sess-1", "stamp-1"]);
     expect(hash).not.toContain("2222");
   });
 
-  it("changes nothing when the admin reset the tile in between", async () => {
-    checkPin.mockResolvedValueOnce({ ok: true });
+  it("changes nothing when the PIN changed in between (an admin reset, another phone)", async () => {
+    checkPin.mockResolvedValueOnce({ ok: true, stamp: "stamp-1" });
     query.mockResolvedValueOnce([{ changed: false }]);
     expect((await post({ current: "1111", next: "2222" })).status).toBe(409);
   });

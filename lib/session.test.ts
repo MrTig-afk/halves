@@ -1,5 +1,11 @@
-import { beforeAll, describe, expect, it } from "vitest";
-import { readSessionId, signSession } from "./session";
+import { beforeAll, describe, expect, it, vi } from "vitest";
+
+const { query, jar } = vi.hoisted(() => ({ query: vi.fn(), jar: { value: "" } }));
+vi.mock("./db", () => ({ query }));
+vi.mock("next/headers", () => ({
+  cookies: async () => ({ get: () => ({ value: jar.value }), set: (_: string, v: string) => (jar.value = v) }),
+}));
+const { currentPerson, readSessionId, signSession, startSession } = await import("./session");
 
 const id = "3f1c2b8e-5d7a-4e9b-8c1f-0a2b3c4d5e6f";
 
@@ -25,5 +31,18 @@ describe("session cookie", () => {
     const good = signSession(id);
     process.env.SESSION_SECRET = "a-different-secret-also-long-enough-111";
     expect(readSessionId(good)).toBeNull();
+  });
+});
+
+describe("sessions and PIN changes", () => {
+  it("records the stamp a session was signed in with, and counts it only while it is the person's current one", async () => {
+    query.mockResolvedValueOnce([{ id: id }]);
+    await startSession(4, "stamp-1");
+    expect(query.mock.calls[0][0]).toMatch(/select id, pin_stamp from person where id = \$1 and pin_stamp = \$2::uuid/);
+    expect(query.mock.calls[0][1]).toEqual([4, "stamp-1"]);
+    expect(readSessionId(jar.value)).toBe(id);
+    query.mockResolvedValueOnce([]);
+    expect(await currentPerson()).toBeNull();
+    expect(query.mock.calls[1][0]).toMatch(/where s\.id = \$1 and s\.pin_stamp = p\.pin_stamp/);
   });
 });

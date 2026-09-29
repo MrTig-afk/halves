@@ -43,11 +43,15 @@ export function readSessionId(value: string | undefined): string | null {
 
 // The signed-in person for this request (Server Components and route handlers). cache() makes a
 // layout and its page share one lookup per render.
+// A session counts only while it carries the person's current pin_stamp (db/schema.sql), so any
+// PIN change - admin reset, a new claim, Change PIN - ends every session signed in with the old PIN,
+// including one written a moment after the change by a sign-in that checked the old PIN.
 export const currentPerson = cache(async (): Promise<Person | null> => {
   const id = readSessionId((await cookies()).get(SESSION_COOKIE)?.value);
   if (!id) return null;
   const rows = await query<Person>(
-    "select p.id::int as id, p.name, p.role from device_session s join person p on p.id = s.person_id where s.id = $1",
+    `select p.id::int as id, p.name, p.role from device_session s join person p on p.id = s.person_id
+     where s.id = $1 and s.pin_stamp = p.pin_stamp`,
     [id],
   );
   return rows[0] ?? null;
@@ -58,9 +62,17 @@ export async function currentSessionId(): Promise<string | null> {
   return readSessionId((await cookies()).get(SESSION_COOKIE)?.value);
 }
 
-export async function startSession(personId: number): Promise<void> {
-  const rows = await query("insert into device_session (person_id) values ($1) returning id::text as id", [personId]);
+// `stamp`: the person's pin_stamp read together with the PIN that was checked (lib/auth.ts). False
+// when that PIN changed in the meantime: no session is written.
+export async function startSession(personId: number, stamp: string): Promise<boolean> {
+  const rows = await query(
+    `insert into device_session (person_id, pin_stamp)
+     select id, pin_stamp from person where id = $1 and pin_stamp = $2::uuid returning id::text as id`,
+    [personId, stamp],
+  );
+  if (!rows.length) return false;
   (await cookies()).set(SESSION_COOKIE, signSession(rows[0].id as string), SESSION_COOKIE_OPTIONS);
+  return true;
 }
 
 export async function endSession(): Promise<void> {
