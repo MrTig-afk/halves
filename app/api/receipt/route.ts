@@ -3,12 +3,10 @@
 import { GeminiError, pausedUntil, readReceipt } from "@/lib/gemini";
 import { ImageError, MAX_UPLOAD_BYTES, normaliseImage } from "@/lib/image";
 import { ReceiptError } from "@/lib/receipt";
+import { fail } from "@/lib/http";
 import { currentPerson } from "@/lib/session";
 
 export const maxDuration = 60;
-
-const fail = (status: number, error: string, message: string, retryable = false, until?: string) =>
-  Response.json({ error, message, retryable, ...(until && { until }) }, { status });
 
 export async function POST(req: Request) {
   if (!(await currentPerson())) return fail(401, "signed_out", "Sign in again to read receipts.");
@@ -40,7 +38,7 @@ export async function POST(req: Request) {
     }
     if (e instanceof GeminiError) {
       if (e.code === "quota") {
-        // userflow E4 for the daily limit; a per-minute limit clears within the minute, so it
+        // The daily limit lasts until midnight Pacific; a per-minute limit clears within the minute, so it
         // offers Try again.
         return e.daily
           ? fail(429, "ai_paused", "The free AI limit for today is used up. You can still enter this bill by hand, and your photo is kept.", false, pausedUntil(e))

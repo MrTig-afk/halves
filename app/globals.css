@@ -669,3 +669,19 @@ input.plain[type="date"] {
   font-style: italic;
   quotes: "\201C" "\201D";
 }
+
+/* Saved (B7) */
+.icon-art.ok {
+  background: var(--green-tint);
+  color: var(--green-strong);
+}
+.soft {
+  align-self: stretch;
+  background: var(--green-tint);
+  border-radius: 12px;
+  padding: 10px 12px;
+}
+.tab-amt {
+  font-size: 22px;
+  font-weight: 800;
+}

@@ -76,6 +76,8 @@ CREATE TABLE IF NOT EXISTS scan_request (
   person_id   bigint      NOT NULL REFERENCES person(id),
   created_at  timestamptz NOT NULL DEFAULT now()
 );
+-- The bill a scan id saved, so a retried save can answer with the stored bill.
+ALTER TABLE scan_request ADD COLUMN IF NOT EXISTS bill_id bigint REFERENCES bill(id);
 
 -- Receipt photos. Same database; kept only while the whole Neon project stays under
 -- 400 MB (checked before each insert), so photos can never fill the 0.5 GB free cap
