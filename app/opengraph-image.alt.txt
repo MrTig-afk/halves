@@ -1,0 +1,1 @@
+Halves: split receipts and keep a running tab

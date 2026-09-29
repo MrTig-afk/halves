@@ -1,0 +1,41 @@
+# CI - the gate everything else keys off. No tokens.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Lint
+        run: npm run lint
+      - name: Test
+        run: npm test
+      - name: Build
+        run: npm run build
+
+  semgrep:
+    runs-on: ubuntu-latest
+    container:
+      image: semgrep/semgrep
+    steps:
+      - uses: actions/checkout@v6
+      # Named rulesets, not --config auto: adding a ruleset is a visible edit here.
+      # They are still live registry rulesets and can change upstream.
+      - run: semgrep scan --config p/typescript --config p/javascript --config p/react --config p/nextjs --config p/secrets --error
