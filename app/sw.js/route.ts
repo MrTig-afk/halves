@@ -33,6 +33,32 @@ self.addEventListener("message", (event) => {
   if (event.data && event.data.type === "SKIP_WAITING") self.skipWaiting();
 });
 
+// Web Push: the server sends only { title, url }; the title is the whole message.
+self.addEventListener("push", (event) => {
+  let note = {};
+  try {
+    note = (event.data && event.data.json()) || {};
+  } catch (e) {}
+  event.waitUntil(
+    self.registration.showNotification(note.title || "Halves", { icon: "/icons/icon-192.png", data: { url: note.url || "/" } }),
+  );
+});
+
+// Tapping it opens that bill (or Home), in the app's window when one is open.
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  const target = new URL((event.notification.data && event.notification.data.url) || "/", self.location.origin);
+  const url = target.origin === self.location.origin ? target.href : self.location.origin + "/";
+  event.waitUntil(
+    clients.matchAll({ type: "window", includeUncontrolled: true }).then((list) => {
+      const open = list.find((c) => c.url.startsWith(self.location.origin));
+      if (!open) return clients.openWindow(url);
+      // navigate() only works on a window this worker controls.
+      return open.focus().then((c) => c.navigate(url)).catch(() => clients.openWindow(url));
+    }),
+  );
+});
+
 self.addEventListener("fetch", (event) => {
   const req = event.request;
   if (req.method !== "GET") return;

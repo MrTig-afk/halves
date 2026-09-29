@@ -41,6 +41,10 @@ CREATE TABLE IF NOT EXISTS push_subscription (
   auth        text        NOT NULL,
   created_at  timestamptz NOT NULL DEFAULT now()
 );
+-- A subscription belongs to the phone's signed-in session: signing out, a PIN change or a PIN reset
+-- deletes the session and with it that phone's notifications.
+ALTER TABLE push_subscription ADD COLUMN IF NOT EXISTS session_id uuid REFERENCES device_session(id) ON DELETE CASCADE;
+ALTER TABLE push_subscription ALTER COLUMN session_id SET NOT NULL;
 
 CREATE TABLE IF NOT EXISTS bill (
   id                    bigint      GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
@@ -121,6 +125,7 @@ BEGIN
     GRANT SELECT, INSERT, UPDATE         ON person            TO halves_app;
     GRANT SELECT, INSERT, UPDATE, DELETE ON device_session    TO halves_app;
     GRANT SELECT, INSERT, DELETE         ON push_subscription TO halves_app;
+    GRANT UPDATE (person_id, session_id, p256dh, auth) ON push_subscription TO halves_app;
     GRANT SELECT, INSERT                 ON bill              TO halves_app;
     GRANT UPDATE (settlement_id, photo_state) ON bill         TO halves_app;
     GRANT SELECT, INSERT                 ON line_item         TO halves_app;

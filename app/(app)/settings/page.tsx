@@ -1,10 +1,12 @@
 import { cookies } from "next/headers";
 import Link from "next/link";
 import { Appearance } from "@/components/Appearance";
+import { NotificationsSwitch } from "@/components/Notifications";
 import { SignOutButton } from "@/components/SignOutButton";
 import { initial } from "@/lib/names";
 import { people } from "@/lib/people";
 import { photoSummary } from "@/lib/photos";
+import { vapidPublicKey } from "@/lib/push";
 import { requirePerson } from "@/lib/session";
 import { readTheme, THEME_COOKIE } from "@/lib/theme";
 
@@ -45,6 +47,10 @@ export default async function Settings({ searchParams }: { searchParams: Promise
           <div className="li">
             <span className="grow">Appearance</span>
             <Appearance initial={readTheme((await cookies()).get(THEME_COOKIE)?.value)} />
+          </div>
+          <div className="li">
+            <span className="grow">Notifications</span>
+            <NotificationsSwitch publicKey={vapidPublicKey()} />
           </div>
           <Link href="/settings/pin" className="li">
             <span className="grow">Change PIN</span>

@@ -28,8 +28,8 @@ export async function addPerson(name: string): Promise<number | null> {
   return r?.id ?? null;
 }
 
-// Back to an unclaimed tile, signed out on every phone and with no phone left receiving its
-// notifications, in one statement. An admin tile is never reset this way (the admin changes their
+// Back to an unclaimed tile, signed out on every phone - and so with no phone left receiving its
+// notifications (a subscription goes with its session) - in one statement. An admin tile is never reset this way (the admin changes their
 // own PIN), or the admin tile could be claimed by whoever tapped it first.
 export async function resetPin(id: number): Promise<boolean> {
   const [r] = await query<{ reset: boolean }>(
@@ -37,8 +37,7 @@ export async function resetPin(id: number): Promise<boolean> {
        update person set pin_hash = null, failed_pin_count = 0, locked_until = null, claimed_at = null
        where id = $1 and role = 'member' returning id
      ),
-     s as (delete from device_session where person_id in (select id from p) returning 1),
-     n as (delete from push_subscription where person_id in (select id from p) returning 1)
+     s as (delete from device_session where person_id in (select id from p) returning 1)
      select exists (select 1 from p) as reset`,
     [id],
   );

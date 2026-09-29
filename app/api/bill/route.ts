@@ -7,7 +7,9 @@ import { query } from "@/lib/db";
 import { BillError, parseBill, type NewBill, type Saved } from "@/lib/bill";
 import { fail } from "@/lib/http";
 import { ImageError, MAX_UPLOAD_BYTES, normaliseImage } from "@/lib/image";
+import { firstName } from "@/lib/names";
 import { PHOTO_CAP_BYTES } from "@/lib/photos";
+import { hasPush, notifyLater } from "@/lib/push";
 import { currentPerson } from "@/lib/session";
 import { partnerOwes } from "@/lib/split";
 import { tabs } from "@/lib/tab";
@@ -83,6 +85,7 @@ export async function POST(req: Request) {
 
   const owes = partnerOwes(bill.lines, bill.total_cents);
   const total = bill.total_cents ?? bill.lines.reduce((s, l) => s + l.price_cents, 0);
+  const partnerPush = hasPush(bill.partner_id); // never throws; runs alongside the save
   let saved: Saved;
   try {
     const [r] = await query<{ id: number | null; photo_state: Saved["photo"]; was: number }>(SAVE, [
@@ -100,16 +103,18 @@ export async function POST(req: Request) {
       JSON.stringify(bill.lines.map((l, i) => ({ position: i + 1, ...l }))),
     ]);
     if (r.id === null) return fail(400, "bad_bill", "Pick who this bill is with.");
-    saved = { duplicate: false, photo: r.photo_state, owes, partner_id: bill.partner_id, description: bill.description, was: r.was };
+    notifyLater(bill.partner_id, { title: `${firstName(me.name)} added a bill`, url: `/bill/${r.id}` });
+    saved = { duplicate: false, photo: r.photo_state, owes, partner_id: bill.partner_id, description: bill.description, was: r.was, notified: false };
   } catch (e) {
     const err = e as { code?: string; constraint?: string };
     if (err.code !== "23505" || err.constraint !== "scan_request_pkey") throw e;
-    const [stored] = await query<Omit<Saved, "duplicate" | "was">>(STORED, [bill.scan_id, me.id]);
+    const [stored] = await query<Omit<Saved, "duplicate" | "was" | "notified">>(STORED, [bill.scan_id, me.id]);
     // A scan id used by the other person is refused.
     if (!stored) return fail(409, "conflict", "This bill couldn't be saved. Scan it again.");
     const balance = (await tabs(me.id)).find((t) => t.partner_id === stored.partner_id)?.balance ?? 0;
-    saved = { duplicate: true, ...stored, was: balance - stored.owes };
+    saved = { duplicate: true, ...stored, was: balance - stored.owes, notified: false };
   }
+  saved.notified = await (saved.partner_id === bill.partner_id ? partnerPush : hasPush(saved.partner_id));
   console.info(JSON.stringify({ event: saved.duplicate ? "bill_duplicate" : "bill_saved", lines: bill.lines.length, photo: saved.photo }));
   return Response.json(saved);
 }

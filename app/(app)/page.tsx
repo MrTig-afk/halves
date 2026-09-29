@@ -3,9 +3,11 @@ import { redirect } from "next/navigation";
 import { BillItem } from "@/components/BillItem";
 import { Icon } from "@/components/Icon";
 import { InstallCard } from "@/components/InstallCard";
+import { NotifyPrompt } from "@/components/Notifications";
 import { SettleButton } from "@/components/SettleButton";
 import { formatCents } from "@/lib/money";
 import { firstName, initial, isToday, localDate, shortDate } from "@/lib/names";
+import { vapidPublicKey } from "@/lib/push";
 import { currentPerson } from "@/lib/session";
 import { openBills, rounds, tabs } from "@/lib/tab";
 
@@ -20,6 +22,7 @@ export default async function Home() {
 
   return (
     <main className="screen">
+      <NotifyPrompt publicKey={vapidPublicKey()} partner={partner} />
       <div className="bar">
         <Link href="/" className="logo">
           <span className="mark" />
