@@ -43,6 +43,7 @@ portfolio/
 project_summary.txt
 docs/internal/
 *.tex
+docs/*-prd.md
 
 # browser automation output
 .playwright-mcp/

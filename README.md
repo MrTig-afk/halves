@@ -2,7 +2,7 @@
 
 Scan a receipt, crop it to the items and choose what's shared by tap or by voice. Halves keeps a running tab between two roommates, and one Settle all clears it.
 
-Live URL: not deployed yet.
+Live URL: https://halves-nine.vercel.app
 
 ## Stack
 
