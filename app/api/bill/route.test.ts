@@ -97,6 +97,13 @@ describe("POST /api/bill", () => {
     expect((await post({ ...bill, partner_id: 99 })).status).toBe(400);
   });
 
+  it("saves the largest bill a receipt can read: 200 lines of 200-character names, each sent twice (lines + ai)", async () => {
+    query.mockResolvedValueOnce([{ id: 5, photo_state: "none", was: 0 }]);
+    const lines = Array.from({ length: 200 }, (_, i) => ({ name: `${i}`.padEnd(200, "x"), price_cents: 9_999, kind: "item", share: "partner" }));
+    const ai = { store_name: "x".repeat(60), date: "2026-09-29", total_cents: 1_999_800, lines: lines.map((l) => ({ name: l.name, price_cents: l.price_cents, kind: l.kind })) };
+    expect((await post({ ...bill, description: "x".repeat(60), total_cents: 1_999_800, lines, ai })).status).toBe(200);
+  });
+
   it("refuses malformed bills without touching the database", async () => {
     expect(await json(await post({ ...bill, lines: [] }))).toMatchObject({ status: 400, error: "bad_bill" });
     expect(query).not.toHaveBeenCalled();

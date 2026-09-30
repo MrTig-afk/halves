@@ -3,6 +3,7 @@
 // Signed-in devices only: every call spends the shared free AI allowance.
 import { query } from "@/lib/db";
 import { GeminiError, pausedUntil, readVoice } from "@/lib/gemini";
+import { MAX_NAME } from "@/lib/receipt";
 import { fail } from "@/lib/http";
 import { currentPerson } from "@/lib/session";
 import { matchPerson, VoiceError, type VoiceReply } from "@/lib/voice";
@@ -23,11 +24,11 @@ function audioType(b: Buffer): string | null {
 }
 
 function itemNames(v: FormDataEntryValue | null): string[] | null {
-  if (typeof v !== "string" || v.length > MAX_ITEMS * 100) return null;
+  if (typeof v !== "string" || v.length > MAX_ITEMS * (MAX_NAME + 10)) return null;
   try {
     const a: unknown = JSON.parse(v);
     if (!Array.isArray(a) || a.length === 0 || a.length > MAX_ITEMS) return null;
-    return a.every((s) => typeof s === "string" && s.length <= 80) ? (a as string[]) : null;
+    return a.every((s) => typeof s === "string" && s.length <= MAX_NAME) ? (a as string[]) : null;
   } catch {
     return null;
   }

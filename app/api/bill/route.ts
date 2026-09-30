@@ -9,6 +9,7 @@ import { fail } from "@/lib/http";
 import { ImageError, MAX_UPLOAD_BYTES, normaliseImage } from "@/lib/image";
 import { firstName } from "@/lib/names";
 import { PHOTO_CAP_BYTES } from "@/lib/photos";
+import { MAX_LINES, MAX_NAME } from "@/lib/receipt";
 import { hasPush, notifyLater } from "@/lib/push";
 import { currentPerson } from "@/lib/session";
 import { partnerOwes } from "@/lib/split";
@@ -62,9 +63,11 @@ export async function POST(req: Request) {
   } catch {
     return fail(400, "bad_request", "Nothing was sent.");
   }
+  // Every name travels twice (the edited lines and the AI's original reading); ~100 chars of JSON per line besides.
+  const maxChars = 2 * MAX_LINES * (MAX_NAME + 100) + 10_000;
   const raw = form.get("bill");
   const photo = form.get("photo");
-  if (typeof raw !== "string" || raw.length > 100_000) return fail(400, "bad_request", "Nothing was sent.");
+  if (typeof raw !== "string" || raw.length > maxChars) return fail(400, "bad_request", "Nothing was sent.");
 
   let bill: NewBill;
   try {
