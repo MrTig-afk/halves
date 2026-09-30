@@ -42,10 +42,15 @@ describe("POST /api/voice", () => {
   });
 
   it("rejects a missing or malformed item list, saying so", async () => {
-    for (const items of ["[]", "not json", JSON.stringify([1, 2]), JSON.stringify(["x".repeat(81)]), JSON.stringify(Array(201).fill("a"))]) {
+    for (const items of ["[]", "not json", JSON.stringify([1, 2]), JSON.stringify(["x".repeat(201)]), JSON.stringify(Array(201).fill("a"))]) {
       expect(await json(await post(WEBM, items))).toMatchObject({ status: 400, error: "bad_items" });
     }
     expect(readVoice).not.toHaveBeenCalled();
+  });
+
+  it("takes an item name as long as the receipt allows", async () => {
+    readVoice.mockResolvedValueOnce({ reading: { transcript: "t", changes: [], dropped: [], partner_name: null }, model: "m" });
+    expect((await post(WEBM, Array(200).fill("x".repeat(200)))).status).toBe(200);
   });
 
   it("sends only the audio and item names, and maps a spoken name to the person's id", async () => {

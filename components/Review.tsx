@@ -7,7 +7,7 @@ import { Icon } from "@/components/Icon";
 import { useVoice } from "@/components/useVoice";
 import { useRouter } from "next/navigation";
 import { clock, postBill, type VoiceResult } from "@/lib/api";
-import type { ReceiptReading } from "@/lib/receipt";
+import { MAX_NAME, type ReceiptReading } from "@/lib/receipt";
 import { MAX_BILL_CENTS } from "@/lib/bill";
 import { formatCents, parseCents } from "@/lib/money";
 import { firstName as first, initial } from "@/lib/names";
@@ -264,7 +264,7 @@ export function Review({
                     className="plain"
                     value={r.name}
                     placeholder="Item name"
-                    maxLength={80}
+                    maxLength={MAX_NAME}
                     aria-label={`Line ${pos} name`}
                     autoFocus={editing === r.key}
                     onFocus={() => setEditing(r.key)}
