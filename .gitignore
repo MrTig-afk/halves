@@ -47,3 +47,6 @@ docs/*-prd.md
 
 # browser automation output
 .playwright-mcp/
+
+# local Python virtualenv (Halves has no Python)
+venv/

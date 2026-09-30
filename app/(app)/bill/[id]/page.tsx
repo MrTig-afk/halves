@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { Icon } from "@/components/Icon";
 import { PhotoThumb } from "@/components/PhotoThumb";
 import { formatCents, plainCents } from "@/lib/money";
 import { firstName, localDate, shortDate } from "@/lib/names";
@@ -38,6 +39,10 @@ export default async function BillPage({ params, searchParams }: { params: Promi
             <PhotoThumb src={`/api/bill/${b.id}/photo`} />
           ) : b.photo_state === "archived" ? (
             <span className="thumb none xs dim">photo archived</span>
+          ) : b.typed ? (
+            <span className="thumb none dim" aria-label="No receipt">
+              <Icon name="pencil" size={20} />
+            </span>
           ) : null}
           <div className="grow">
             <b className="num">{formatCents(b.total_cents)}</b>
@@ -57,13 +62,14 @@ export default async function BillPage({ params, searchParams }: { params: Promi
             if (l.kind === "item") pos++;
             return (
               <div className={l.kind === "item" ? "li" : "li sub"} key={l.position}>
-                <span className="grow">{l.kind === "item" ? `${pos} ${l.name}` : l.name}</span>
+                <span className="grow">{l.kind === "item" && !b.typed ? `${pos} ${l.name}` : l.name}</span>
                 <ShareWord line={l} iPaid={iPaid} other={other} />
                 <span className="num">{plainCents(l.price_cents)}</span>
               </div>
             );
           })}
         </div>
+        {b.typed && iPaid && !settled && <div className="soft xs dim">Added without a receipt.</div>}
         {settled ? (
           <div className="soft xs dim">Settled with the round of {settled}.</div>
         ) : (

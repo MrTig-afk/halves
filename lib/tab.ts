@@ -32,6 +32,7 @@ export type BillLine = { position: number; name: string; price_cents: number; ki
 export type Bill = BillRow & {
   photo_state: "none" | "kept" | "not_kept_full" | "archived";
   has_photo: boolean;
+  typed: boolean; // added without a receipt (Artifact D4), stored when saved
   settled_at: string | null;
   lines: BillLine[];
 };
@@ -91,6 +92,7 @@ export async function bill(id: number, me: number): Promise<Bill | null> {
   const [b] = await query<Omit<Bill, "lines">>(
     `select ${BILL_COLUMNS}, b.photo_state,
             exists (select 1 from receipt_photo p where p.bill_id = b.id) as has_photo,
+            b.typed,
             (select created_at::text from settlement where id = b.settlement_id) as settled_at
      from ${BILL_FROM} where b.id = $1 and (b.payer_id = $2 or b.partner_id = $2)`,
     [id, me],

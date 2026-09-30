@@ -21,9 +21,9 @@ type Step =
   | { k: "failed"; img: HTMLImageElement; rect: CropRect | null; failure: ApiFailure; jpeg: Blob }
   | { k: "saved"; saved: SavedBill };
 
-const today = () => new Date().toLocaleDateString("en-CA"); // YYYY-MM-DD in local time
+export const today = () => new Date().toLocaleDateString("en-CA"); // YYYY-MM-DD in local time
 // crypto.randomUUID only exists on https and localhost; a phone testing over the LAN is neither.
-const uuid = () =>
+export const uuid = () =>
   crypto.randomUUID?.() ??
   "10000000-1000-4000-8000-100000000000".replace(/[018]/g, (c) => (Number(c) ^ (crypto.getRandomValues(new Uint8Array(1))[0] & (15 >> (Number(c) / 4)))).toString(16));
 
@@ -190,7 +190,7 @@ function Failed({ failure, recrop, retry, byHand, back }: { failure: ApiFailure;
   );
 }
 
-function Saved({ s, again, done }: { s: SavedBill; again: () => void; done: () => void }) {
+export function Saved({ s, again, done, againLabel = "Scan another" }: { s: SavedBill; again: () => void; done: () => void; againLabel?: string }) {
   const now = s.was + s.owes;
   const tab = (c: number) => (c >= 0 ? `${s.partnerName} owes you ${formatCents(c)}` : `You owe ${s.partnerName} ${formatCents(-c)}`);
   return (
@@ -213,7 +213,7 @@ function Saved({ s, again, done }: { s: SavedBill; again: () => void; done: () =
       </div>
       <div className="foot">
         <button type="button" className="btn" onClick={again}>
-          Scan another
+          {againLabel}
         </button>
         <button type="button" className="btn ghost sm" onClick={done}>
           Done

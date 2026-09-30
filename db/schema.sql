@@ -82,6 +82,8 @@ CREATE TABLE IF NOT EXISTS scan_request (
 );
 -- The bill a scan id saved, so a retried save can answer with the stored bill.
 ALTER TABLE scan_request ADD COLUMN IF NOT EXISTS bill_id bigint REFERENCES bill(id);
+-- Added without a receipt (PRD 6.3, v2.3): one line, no photo, no AI reading. Stored, not inferred.
+ALTER TABLE bill ADD COLUMN IF NOT EXISTS typed boolean NOT NULL DEFAULT false;
 
 -- Receipt photos. Same database; kept only while the whole Neon project stays under
 -- 400 MB (checked before each insert), so photos can never fill the 0.5 GB free cap

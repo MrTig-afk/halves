@@ -124,6 +124,7 @@ export function Review({
           share: row.kind === "item" ? row.share : null,
         })),
         ai: draft.ai,
+        typed: false,
       },
       draft.photo,
     );

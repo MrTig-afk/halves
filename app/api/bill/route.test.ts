@@ -52,6 +52,14 @@ describe("POST /api/bill", () => {
     expect(query).toHaveBeenCalledOnce();
     const params = query.mock.calls[0][1];
     expect(params.slice(0, 8)).toEqual([bill.scan_id, 1, 2, "Coles", "2026-09-29", 1000, 1000, 700]);
+    expect(params[12]).toBe(false); // a scanned bill
+  });
+
+  it("stores that a bill was added without a receipt", async () => {
+    query.mockResolvedValueOnce([{ id: 5, photo_state: "none", was: 0 }]);
+    const typed = { ...bill, typed: true, total_cents: 2401, lines: [{ name: "Coles", price_cents: 2401, kind: "item", share: "split" }] };
+    expect(await json(await post(typed))).toMatchObject({ status: 200, owes: 1201 });
+    expect(query.mock.calls[0][1][12]).toBe(true);
   });
 
   it("tells the partner, with no amount or item in the message, and says so when they get notifications", async () => {

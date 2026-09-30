@@ -13,6 +13,7 @@ export type NewBill = {
   total_cents: number | null;
   lines: BillLine[];
   ai: ReceiptReading | null; // the AI's original reading, kept unchanged for measuring accuracy
+  typed: boolean; // added without a receipt (PRD 6.3): exactly one item line above $0.00, no AI reading
 };
 
 // What saving answers: the stored bill's partner, description, amount and photo state, and the tab
@@ -44,11 +45,12 @@ export function parseBill(raw: string): NewBill {
     throw new BillError("not JSON");
   }
   if (!o || typeof o !== "object" || Array.isArray(o)) throw new BillError("not an object");
-  const { scan_id, partner_id, description, date, total_cents, lines, ai } = o;
+  const { scan_id, partner_id, description, date, total_cents, lines, ai, typed = false } = o;
   if (typeof scan_id !== "string" || !UUID.test(scan_id)) throw new BillError("scan id");
   if (typeof partner_id !== "number" || !Number.isInteger(partner_id) || partner_id < 1) throw new BillError("partner");
   if (typeof date !== "string" || !date) throw new BillError("date");
   if (!Array.isArray(lines)) throw new BillError("lines");
+  if (typeof typed !== "boolean") throw new BillError("typed");
 
   // Lines, date, description and total go through the receipt validator: same caps, same sign
   // rules, discounts only under an item, at least one item.
@@ -69,7 +71,6 @@ export function parseBill(raw: string): NewBill {
   if (!checked.date) throw new BillError("date");
   const size = checked.lines.reduce((s, l) => s + Math.abs(l.price_cents), 0);
   if (size > MAX_BILL_CENTS) throw new BillError("bill too large"); // the total alone is capped by parseReceipt
-
   const shares = lines.map((l: { share?: unknown }, i) => {
     const kind = checked.lines[i].kind;
     if (kind === "item") {
@@ -78,6 +79,13 @@ export function parseBill(raw: string): NewBill {
     }
     return null; // discounts follow their item and fees are shared in proportion
   });
+  // A bill without a receipt is one amount above $0.00 - its line and its total - split equally or
+  // owed in full (Artifact D1).
+  const one = checked.lines[0];
+  const bad = ai != null || checked.lines.length !== 1 || one.kind !== "item" || one.price_cents <= 0 || checked.total_cents !== one.price_cents || shares[0] === "payer";
+  if (typed && bad) {
+    throw new BillError("a bill without a receipt is one amount above $0.00, split or owed in full");
+  }
 
   let reading: ReceiptReading | null = null;
   if (ai != null) {
@@ -95,5 +103,6 @@ export function parseBill(raw: string): NewBill {
     total_cents: checked.total_cents,
     lines: checked.lines.map((l, i) => ({ ...l, share: shares[i] })),
     ai: reading,
+    typed,
   };
 }
