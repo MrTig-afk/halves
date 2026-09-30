@@ -22,6 +22,12 @@ describe("partnerOwes", () => {
     expect(partnerOwes(lines, 4994)).toBe(cents);
   });
 
+  it("splits a bill without a receipt (one line, its amount as the total): half rounds up, or all of it", () => {
+    const typed = (share: Share): SplitLine[] => [{ price_cents: 2401, kind: "item", share }];
+    expect(partnerOwes(typed("split"), 2401)).toBe(1201);
+    expect(partnerOwes(typed("partner"), 2401)).toBe(2401);
+  });
+
   it("uses the sum of the lines when no total was read", () => {
     expect(partnerOwes(all("partner"), null)).toBe(4994);
     expect(partnerOwes(all("split"), null)).toBe(2497);

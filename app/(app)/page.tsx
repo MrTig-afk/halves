@@ -41,7 +41,7 @@ export default async function Home() {
             </div>
             <b>No bills yet</b>
             <span className="dim small">
-              Scan a receipt, crop it to the items and choose what&apos;s shared. It adds to your tab with {partner} until you settle up.
+              Scan a receipt, or add a bill without one. It adds to your tab with {partner} until you settle up.
             </span>
           </div>
         </div>
@@ -111,6 +111,9 @@ export default async function Home() {
       <div className="foot">
         <Link href="/scan" className="btn o">
           <Icon name="camera" /> Scan a bill
+        </Link>
+        <Link href="/add" className="btn ghost sm">
+          <Icon name="pencil" size={14} /> Add without a receipt
         </Link>
         <div className="me">Signed in as {me.name}</div>
       </div>

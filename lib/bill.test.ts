@@ -39,8 +39,32 @@ describe("parseBill", () => {
       { lines: [{ name: "Milk", price_cents: -310, kind: "item", share: "payer" }] },
       { lines: Array(201).fill(ok.lines[0]) },
       { ai: { lines: "nope" } },
+      { typed: "yes" },
+      // a bill without a receipt is exactly one item line above $0.00, with no AI reading
+      { typed: true, total_cents: 0, lines: [{ name: "Uber", price_cents: 0, kind: "item", share: "split" }] },
+      { typed: true, total_cents: 2400, lines: [{ name: "Uber", price_cents: 2400, kind: "item", share: "payer" }] }, // split or owed in full only
+      { typed: true, total_cents: 10000, lines: [{ name: "Uber", price_cents: 2400, kind: "item", share: "split" }] }, // its amount is its total
+      { typed: true, total_cents: null, lines: [{ name: "Uber", price_cents: 2400, kind: "item", share: "split" }] },
+      { typed: true, total_cents: 700, lines: [{ name: "Uber", price_cents: 300, kind: "item", share: "split" }, { name: "Tip", price_cents: 400, kind: "item", share: "split" }] },
+      { typed: true, total_cents: 310, lines: [ok.lines[0]], ai: { store_name: null, date: null, total_cents: 310, lines: [{ name: "MILK", price_cents: 310, kind: "item" }] } },
     ];
     for (const b of bad) expect(() => parse(b), JSON.stringify(b)).toThrow(BillError);
+  });
+
+  it("accepts a bill without a receipt: one line named as the bill, its amount as the total, no AI reading", () => {
+    const b = parse({ typed: true, description: "Uber to airport", total_cents: 2401, lines: [{ name: "Uber to airport", price_cents: 2401, kind: "item", share: "partner" }] });
+    expect([b.typed, b.total_cents, b.lines, b.ai]).toEqual([true, 2401, [{ name: "Uber to airport", price_cents: 2401, kind: "item", share: "partner" }], null]);
+    expect(parse({}).typed).toBe(false); // a scanned bill, whatever its shape
+  });
+
+  it("saves scanned bills exactly as before, even ones that net to $0.00", () => {
+    const voucher = [{ name: "Coffee", price_cents: 400, kind: "item", share: "split" }, { name: "Voucher", price_cents: -400, kind: "discount", share: null }];
+    expect(parse({ total_cents: null, lines: voucher }).lines).toHaveLength(2);
+    expect(parse({ total_cents: 0, lines: [{ name: "Free sample", price_cents: 0, kind: "item", share: "split" }] }).lines).toHaveLength(1);
+  });
+
+  it("still saves a scanned receipt whose total is $0.00 (paid by voucher) when its lines are not", () => {
+    expect(parse({ total_cents: 0 }).total_cents).toBe(0);
   });
 
   it("caps a whole bill at $100,000 so the split arithmetic stays exact", () => {

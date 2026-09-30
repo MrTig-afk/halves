@@ -21,10 +21,11 @@ const SAVE = `
   with p as (select id from person where id = $3 and id <> $2),
   b as (
     insert into bill (payer_id, partner_id, description, bill_date, receipt_total_cents, total_cents,
-                      partner_owes_cents, ai_items, photo_state)
+                      partner_owes_cents, ai_items, photo_state, typed)
     select $2, $3, $4, $5::date, $6, $7, $8, $9::jsonb,
            case when $10::text is null then 'none'
-                when pg_database_size(current_database()) < $11 then 'kept' else 'not_kept_full' end
+                when pg_database_size(current_database()) < $11 then 'kept' else 'not_kept_full' end,
+           $13
     from p returning id, photo_state
   ),
   s as (insert into scan_request (scan_id, person_id, bill_id) select $1, $2, b.id from b returning 1),
@@ -104,6 +105,7 @@ export async function POST(req: Request) {
       jpeg ? jpeg.toString("base64") : null,
       PHOTO_CAP_BYTES,
       JSON.stringify(bill.lines.map((l, i) => ({ position: i + 1, ...l }))),
+      bill.typed,
     ]);
     if (r.id === null) return fail(400, "bad_bill", "Pick who this bill is with.");
     notifyLater(bill.partner_id, { title: `${firstName(me.name)} added a bill`, url: `/bill/${r.id}` });

@@ -478,6 +478,9 @@ button {
 .plain.b {
   font-weight: 700;
 }
+.amount-in {
+  font-size: 22px;
+}
 select.plain,
 input.plain[type="date"] {
   width: auto;
