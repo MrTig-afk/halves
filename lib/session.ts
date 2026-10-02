@@ -28,15 +28,21 @@ function secret() {
   return s;
 }
 
-export function signSession(id: string): string {
-  return `${id}.${createHmac("sha256", secret()).update(id).digest("base64url")}`;
+// A keyed hash of `value`: the cookie signature, and the stored form of a network address.
+export function mac(value: string): string {
+  return createHmac("sha256", secret()).update(value).digest("base64url");
 }
 
-export function readSessionId(value: string | undefined): string | null {
+// `domain` keeps cookie kinds apart: a session value never reads as a device value, nor back.
+export function signSession(id: string, domain = ""): string {
+  return `${id}.${mac(domain + id)}`;
+}
+
+export function readSessionId(value: string | undefined, domain = ""): string | null {
   if (!value) return null;
   const id = value.slice(0, value.lastIndexOf("."));
   if (!UUID.test(id)) return null;
-  const want = Buffer.from(signSession(id));
+  const want = Buffer.from(signSession(id, domain));
   const got = Buffer.from(value);
   return want.length === got.length && timingSafeEqual(want, got) ? id : null;
 }
