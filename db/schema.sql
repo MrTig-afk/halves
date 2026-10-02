@@ -85,6 +85,66 @@ ALTER TABLE scan_request ADD COLUMN IF NOT EXISTS bill_id bigint REFERENCES bill
 -- Added without a receipt (PRD 6.3, v2.3): one line, no photo, no AI reading. Stored, not inferred.
 ALTER TABLE bill ADD COLUMN IF NOT EXISTS typed boolean NOT NULL DEFAULT false;
 
+-- A bill has 2 to 5 people. Who entered it is kept apart from who paid; what each person owes,
+-- and whether it is settled, lives on bill_person; who had each item on line_item_person.
+ALTER TABLE bill ADD COLUMN IF NOT EXISTS added_by bigint REFERENCES person(id);
+-- The date and the receipt total come from the receipt; an edited one says when it was edited
+-- ("edited 29 Sep, 6:02 pm"). Null = not edited; set by the server to the save time.
+ALTER TABLE bill ADD COLUMN IF NOT EXISTS date_edited_at timestamptz;
+ALTER TABLE bill ADD COLUMN IF NOT EXISTS total_edited_at timestamptz;
+-- The two-person columns stay until the contract step; code that does not write them must be able to.
+ALTER TABLE bill ALTER COLUMN partner_id DROP NOT NULL;
+ALTER TABLE bill ALTER COLUMN partner_owes_cents DROP NOT NULL;
+
+CREATE TABLE IF NOT EXISTS bill_person (
+  bill_id        bigint NOT NULL REFERENCES bill(id),
+  person_id      bigint NOT NULL REFERENCES person(id),
+  owes_cents     int    NOT NULL CHECK (owes_cents >= 0),   -- 0 for the payer
+  settlement_id  bigint REFERENCES settlement(id),           -- null = no round yet; set once, by Settle up
+  PRIMARY KEY (bill_id, person_id)
+);
+
+CREATE TABLE IF NOT EXISTS line_item_person (
+  line_item_id  bigint NOT NULL REFERENCES line_item(id),
+  person_id     bigint NOT NULL REFERENCES person(id),
+  PRIMARY KEY (line_item_id, person_id)
+);
+
+-- Wrong PINs per phone. client = 'd:<device id>' (signed device cookie) or 'ip:<keyed hash>' (a
+-- request without one); wrong = the moments of its wrong PINs in the last 15 minutes. No RLS:
+-- written before anyone is signed in; holds no name, PIN or raw address.
+-- ponytail: rows are never deleted (one small row per phone or address); add a sweep if the table ever matters.
+CREATE TABLE IF NOT EXISTS pin_throttle (
+  client  text          PRIMARY KEY,
+  wrong   timestamptz[] NOT NULL
+);
+
+-- Bills saved before multi-person (partner_id set) become two bill_person rows, and each item
+-- line's share becomes who had it. Re-runnable: rows already copied are skipped, and a settle the
+-- old code made after the first copy is carried over. Skipped once the old columns are gone.
+-- One EXECUTE per statement: the statements must not be parsed while the columns are absent.
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.columns
+             WHERE table_schema = 'public' AND table_name = 'bill' AND column_name = 'partner_id') THEN
+    EXECUTE 'UPDATE bill SET added_by = payer_id WHERE added_by IS NULL';
+    EXECUTE 'INSERT INTO bill_person (bill_id, person_id, owes_cents, settlement_id)
+             SELECT id, payer_id, 0, NULL FROM bill WHERE partner_id IS NOT NULL
+             ON CONFLICT DO NOTHING';
+    EXECUTE 'INSERT INTO bill_person (bill_id, person_id, owes_cents, settlement_id)
+             SELECT id, partner_id, partner_owes_cents, settlement_id FROM bill WHERE partner_id IS NOT NULL
+             ON CONFLICT (bill_id, person_id) DO UPDATE SET settlement_id = EXCLUDED.settlement_id
+             WHERE bill_person.settlement_id IS NULL AND EXCLUDED.settlement_id IS NOT NULL';
+    EXECUTE 'INSERT INTO line_item_person (line_item_id, person_id)
+             SELECT li.id, b.payer_id FROM line_item li JOIN bill b ON b.id = li.bill_id
+             WHERE li.kind = ''item'' AND li.share IN (''payer'', ''split'') AND b.partner_id IS NOT NULL
+             UNION ALL
+             SELECT li.id, b.partner_id FROM line_item li JOIN bill b ON b.id = li.bill_id
+             WHERE li.kind = ''item'' AND li.share IN (''partner'', ''split'') AND b.partner_id IS NOT NULL
+             ON CONFLICT DO NOTHING';
+  END IF;
+END $$;
+
 -- Receipt photos. Same database; kept only while the whole Neon project stays under
 -- 400 MB (checked before each insert), so photos can never fill the 0.5 GB free cap
 -- and block saving bills.
@@ -122,6 +182,98 @@ DROP TRIGGER IF EXISTS bill_settle_once ON bill;
 CREATE TRIGGER bill_settle_once BEFORE UPDATE OF settlement_id ON bill
   FOR EACH ROW EXECUTE FUNCTION bill_settle_once();
 
+-- A share is settled once and stays settled: null -> a round, never back, never another round.
+CREATE OR REPLACE FUNCTION bill_person_settle_once() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  IF OLD.settlement_id IS NOT NULL AND NEW.settlement_id IS DISTINCT FROM OLD.settlement_id THEN
+    RAISE EXCEPTION 'share of bill % is already settled', OLD.bill_id;
+  END IF;
+  RETURN NEW;
+END $$;
+DROP TRIGGER IF EXISTS bill_person_settle_once ON bill_person;
+CREATE TRIGGER bill_person_settle_once BEFORE UPDATE OF settlement_id ON bill_person
+  FOR EACH ROW EXECUTE FUNCTION bill_person_settle_once();
+
+-- Functions that act for the signed-in person. SECURITY DEFINER, owned by the migration role, with
+-- a pinned search_path (halves_app cannot create objects in public, so nothing can shadow a name).
+-- Who the app is acting for: set by lib/db.ts for one transaction (set_config('app.person_id', id, true)).
+CREATE OR REPLACE FUNCTION app_person() RETURNS bigint LANGUAGE sql STABLE SECURITY DEFINER
+  SET search_path = public, pg_temp AS
+$$ SELECT nullif(current_setting('app.person_id', true), '')::bigint $$;
+
+-- On the bill, or its adder (the adder is always on it, so this widens nothing; it lets a save see
+-- its own bill before its bill_person rows exist). VOLATILE on purpose: it must see rows inserted
+-- earlier in the same save statement.
+CREATE OR REPLACE FUNCTION is_member(b bigint) RETURNS boolean LANGUAGE sql VOLATILE SECURITY DEFINER
+  SET search_path = public, pg_temp AS
+$$ SELECT EXISTS (SELECT 1 FROM bill_person WHERE bill_id = b AND person_id = app_person())
+       OR EXISTS (SELECT 1 FROM bill WHERE id = b AND added_by = app_person()) $$;
+
+CREATE OR REPLACE FUNCTION is_adder(b bigint) RETURNS boolean LANGUAGE sql VOLATILE SECURITY DEFINER
+  SET search_path = public, pg_temp AS
+$$ SELECT EXISTS (SELECT 1 FROM bill WHERE id = b AND added_by = app_person()) $$;
+
+CREATE OR REPLACE FUNCTION line_bill(li bigint) RETURNS bigint LANGUAGE sql VOLATILE SECURITY DEFINER
+  SET search_path = public, pg_temp AS
+$$ SELECT bill_id FROM line_item WHERE id = li $$;
+
+-- The admin adds a tile. Null when the caller is not the admin or the name is taken.
+CREATE OR REPLACE FUNCTION admin_add_person(n text) RETURNS bigint LANGUAGE sql VOLATILE SECURITY DEFINER
+  SET search_path = public, pg_temp AS
+$$ WITH ins AS (
+     INSERT INTO person (name)
+     SELECT n WHERE EXISTS (SELECT 1 FROM person WHERE id = app_person() AND role = 'admin')
+     ON CONFLICT DO NOTHING RETURNING id)
+   SELECT id FROM ins $$;
+
+-- The admin resets a member's PIN: unclaimed tile, signed out everywhere. False when the caller is
+-- not the admin, or the tile is the admin's or unknown.
+CREATE OR REPLACE FUNCTION admin_reset_pin(p bigint) RETURNS boolean LANGUAGE sql VOLATILE SECURITY DEFINER
+  SET search_path = public, pg_temp AS
+$$ WITH u AS (
+     UPDATE person SET pin_hash = null, pin_stamp = gen_random_uuid(), failed_pin_count = 0, locked_until = null, claimed_at = null
+     WHERE id = p AND role = 'member'
+       AND EXISTS (SELECT 1 FROM person a WHERE a.id = app_person() AND a.role = 'admin')
+     RETURNING id),
+   s AS (DELETE FROM device_session WHERE person_id IN (SELECT id FROM u) RETURNING 1)
+   SELECT EXISTS (SELECT 1 FROM u) $$;
+
+-- Someone's phones that still sign them in (the pin_stamp rule in lib/session.ts).
+CREATE OR REPLACE FUNCTION push_targets(p bigint) RETURNS TABLE (id bigint, endpoint text, p256dh text, auth text)
+  LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS
+$$ SELECT ps.id, ps.endpoint, ps.p256dh, ps.auth
+   FROM push_subscription ps
+   JOIN device_session s ON s.id = ps.session_id
+   JOIN person pe ON pe.id = s.person_id AND pe.pin_stamp = s.pin_stamp
+   WHERE ps.person_id = p $$;
+
+-- A dead endpoint (the push service says it is gone) is forgotten.
+CREATE OR REPLACE FUNCTION drop_push(sub bigint) RETURNS void LANGUAGE sql VOLATILE SECURITY DEFINER
+  SET search_path = public, pg_temp AS
+$$ DELETE FROM push_subscription WHERE id = sub $$;
+
+-- Saves this phone's subscription for the signed-in person. A phone whose endpoint is still held by
+-- another person's stale session takes it over, which the person's own view could not do. False when
+-- the session is not the caller's.
+CREATE OR REPLACE FUNCTION save_push(sess uuid, ep text, k1 text, k2 text) RETURNS boolean LANGUAGE sql VOLATILE SECURITY DEFINER
+  SET search_path = public, pg_temp AS
+$$ WITH ok AS (SELECT 1 FROM device_session WHERE id = sess AND person_id = app_person()),
+   old AS (DELETE FROM push_subscription WHERE session_id = sess AND endpoint <> ep AND EXISTS (SELECT 1 FROM ok) RETURNING 1),
+   ins AS (
+     INSERT INTO push_subscription (person_id, session_id, endpoint, p256dh, auth)
+     SELECT app_person(), sess, ep, k1, k2 WHERE EXISTS (SELECT 1 FROM ok)
+     ON CONFLICT (endpoint) DO UPDATE
+       SET person_id = excluded.person_id, session_id = excluded.session_id, p256dh = excluded.p256dh, auth = excluded.auth
+     RETURNING 1)
+   SELECT EXISTS (SELECT 1 FROM ins) $$;
+
+-- The pinned search_path is safe only while nobody else can create objects in public.
+REVOKE CREATE ON SCHEMA public FROM PUBLIC;
+-- Nobody runs them by default, whether or not the app role exists yet; it is granted them below.
+REVOKE EXECUTE ON FUNCTION app_person(), is_member(bigint), is_adder(bigint), line_bill(bigint),
+  admin_add_person(text), admin_reset_pin(bigint), push_targets(bigint), drop_push(bigint),
+  save_push(uuid, text, text, text) FROM PUBLIC;
+
 -- The app role (created once at setup, no DDL rights) gets exactly what the PRD allows.
 -- Saved bills are immutable: bills only gain a settlement or an archived
 -- photo; line items and settlements are insert-only. Everything is revoked first so
@@ -130,6 +282,7 @@ DO $$
 BEGIN
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'halves_app') THEN
     REVOKE ALL ON ALL TABLES IN SCHEMA public FROM halves_app;
+    REVOKE CREATE ON SCHEMA public FROM halves_app;
     GRANT USAGE ON SCHEMA public TO halves_app;
     GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO halves_app;
     GRANT SELECT, INSERT, UPDATE         ON person            TO halves_app;
@@ -139,6 +292,14 @@ BEGIN
     GRANT SELECT, INSERT                 ON bill              TO halves_app;
     GRANT UPDATE (settlement_id, photo_state) ON bill         TO halves_app;
     GRANT SELECT, INSERT                 ON line_item         TO halves_app;
+    GRANT SELECT, INSERT                 ON bill_person       TO halves_app;
+    GRANT UPDATE (settlement_id)         ON bill_person       TO halves_app;
+    GRANT SELECT, INSERT                 ON line_item_person  TO halves_app;
+    GRANT SELECT, INSERT                 ON pin_throttle      TO halves_app;
+    GRANT UPDATE (wrong)                 ON pin_throttle      TO halves_app;
+    GRANT EXECUTE ON FUNCTION app_person(), is_member(bigint), is_adder(bigint), line_bill(bigint),
+      admin_add_person(text), admin_reset_pin(bigint), push_targets(bigint), drop_push(bigint),
+      save_push(uuid, text, text, text) TO halves_app;
     GRANT SELECT, INSERT                 ON settlement        TO halves_app;
     GRANT SELECT, INSERT                 ON scan_request      TO halves_app;
     GRANT SELECT, INSERT, UPDATE, DELETE ON receipt_photo     TO halves_app;
