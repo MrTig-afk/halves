@@ -8,10 +8,9 @@ import { useRef, useState } from "react";
 import { Icon } from "@/components/Icon";
 import { ImageCropper } from "@/components/ImageCropper";
 import { Review, type Draft, type Partner, type SavedBill } from "@/components/Review";
-import { clock, postReceipt, type ApiFailure } from "@/lib/api";
+import { Saved } from "@/components/Saved";
+import { clock, postReceipt, today, uuid, type ApiFailure } from "@/lib/api";
 import { cropToJpeg, loadImage, type CropRect } from "@/lib/cropImage";
-import { formatCents } from "@/lib/money";
-import { firstName } from "@/lib/names";
 import type { ReceiptReading } from "@/lib/receipt";
 
 type Step =
@@ -21,12 +20,6 @@ type Step =
   | { k: "review"; draft: Draft }
   | { k: "failed"; img: HTMLImageElement; rect: CropRect | null; failure: ApiFailure; jpeg: Blob }
   | { k: "saved"; saved: SavedBill };
-
-export const today = () => new Date().toLocaleDateString("en-CA"); // YYYY-MM-DD in local time
-// crypto.randomUUID only exists on https and localhost; a phone testing over the LAN is neither.
-export const uuid = () =>
-  crypto.randomUUID?.() ??
-  "10000000-1000-4000-8000-100000000000".replace(/[018]/g, (c) => (Number(c) ^ (crypto.getRandomValues(new Uint8Array(1))[0] & (15 >> (Number(c) / 4)))).toString(16));
 
 function draftFrom(reading: ReceiptReading | null, photo: Blob): Draft {
   const base = { scan_id: uuid(), photo, ai: reading };
@@ -186,45 +179,6 @@ function Failed({ failure, recrop, retry, byHand, back }: { failure: ApiFailure;
             Enter by hand
           </button>
         )}
-      </div>
-    </main>
-  );
-}
-
-// Two people: one share and one tab, as ever. (More people get their own screen in T6.)
-export function Saved({ s: { saved, names }, again, done, againLabel = "Scan another" }: { s: SavedBill; again: () => void; done: () => void; againLabel?: string }) {
-  const pid = saved.tabs[0]?.person_id ?? saved.shares[0]?.person_id;
-  const partnerName = pid === undefined ? "your partner" : firstName(names[pid] ?? "your partner");
-  const owes = saved.shares.find((x) => x.person_id === pid)?.owes ?? 0;
-  const was = saved.tabs.find((x) => x.person_id === pid)?.was ?? 0;
-  const notified = pid !== undefined && saved.notified.includes(pid);
-  const now = was + owes;
-  const tab = (c: number) => (c >= 0 ? `${partnerName} owes you ${formatCents(c)}` : `You owe ${partnerName} ${formatCents(-c)}`);
-  return (
-    <main className="screen">
-      <div className="center">
-        <div className="icon-art ok">
-          <Icon name="check" size={40} />
-        </div>
-        <b style={{ fontSize: 17 }}>Saved</b>
-        <div className="small">
-          <b>{saved.description}</b> · {partnerName} owes <span className="num">{formatCents(owes)}</span>
-        </div>
-        <div className="soft">
-          <div className="xs dim">Your tab with {partnerName}</div>
-          <div className={`num tab-amt ${now >= 0 ? "owed" : "owe"}`}>{tab(now)}</div>
-          <div className="xs dim num">was {was >= 0 ? formatCents(was) : tab(was)}</div>
-        </div>
-        {notified && <span className="dim xs">{partnerName} has been notified.</span>}
-        {saved.photo === "not_kept_full" && <span className="dim xs">Photo not kept: photo storage is full. Export photos in Settings to free space.</span>}
-      </div>
-      <div className="foot">
-        <button type="button" className="btn" onClick={again}>
-          {againLabel}
-        </button>
-        <button type="button" className="btn ghost sm" onClick={done}>
-          Done
-        </button>
       </div>
     </main>
   );

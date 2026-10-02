@@ -6,6 +6,7 @@
 //   every item split   -> half the receipt total (taxes and fees included)
 //   every item partner -> the whole receipt total
 // (the sum of all lines stands in when no total was read). Rounded half-up, once per bill.
+import { firstName } from "./names";
 import type { LineKind } from "./receipt";
 
 export type Share = "payer" | "split" | "partner";
@@ -134,4 +135,23 @@ export function breakdown(lines: SplitLine[], people: number[], payer: number, r
 export function eachCents(lines: SplitLine[], item: number): number {
   const it = unpack(lines).items.find((x) => x.line === item);
   return it && it.set.length ? roundHalfUp(it.value, it.set.length) : 0;
+}
+
+// ---- who is on a bill (PRD 6.3 v3.2, Artifact regroup / label) ----
+// The people on a bill changed: an item that was Everyone stays Everyone, anyone taken off the bill
+// leaves every item, and an item left with nobody goes back to Everyone.
+export function regroup(set: number[], oldPeople: number[], newPeople: number[]): number[] {
+  if (set.length === oldPeople.length && oldPeople.every((p) => set.includes(p))) return newPeople.slice();
+  const kept = set.filter((p) => newPeople.includes(p));
+  return kept.length ? kept : newPeople.slice();
+}
+
+// "Everyone" when the set is everyone on the bill, else first names, "Me" for the signed-in person
+// (people in the order given: the viewer first, then id).
+export function setLabel(set: number[], people: { id: number; name: string }[], me: number): string {
+  if (people.every((p) => set.includes(p.id))) return "Everyone";
+  return people
+    .filter((p) => set.includes(p.id))
+    .map((p) => (p.id === me ? "Me" : firstName(p.name)))
+    .join(", ");
 }

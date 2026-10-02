@@ -6,7 +6,7 @@ import { useEffect, useRef, useState } from "react";
 import { Icon } from "@/components/Icon";
 import { useVoice } from "@/components/useVoice";
 import { useRouter } from "next/navigation";
-import { clock, postBill, type VoiceResult } from "@/lib/api";
+import { clock, postBill, saveFailure, type VoiceResult } from "@/lib/api";
 import { MAX_NAME, type ReceiptReading } from "@/lib/receipt";
 import { MAX_BILL_CENTS, type Saved } from "@/lib/bill";
 import { formatCents, parseCents } from "@/lib/money";
@@ -140,9 +140,7 @@ export function Review({
       return onSaved({ saved: r, names: Object.fromEntries(partners.map((p) => [p.id, p.name])) });
     }
     if (r.error === "signed_out") return router.replace("/signin");
-    // Anything worth sending again (no connection, a timeout, a server failure) gets the approved
-    // Retry message; a request the server refused gets its own message and no Retry.
-    setSaveError(r.retryable ? { text: "Couldn't save. Check your connection and try again. Nothing you entered is lost.", retry: true } : { text: r.message, retry: false });
+    setSaveError(saveFailure(r)); // the same handling as the no-receipt form
   };
   // After a failure that may have reached the server, the bill might already be saved under this
   // scan id: nothing can change and Back is off, so Retry sends exactly what was shown.

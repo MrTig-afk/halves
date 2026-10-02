@@ -39,3 +39,6 @@ export function itemLabel(set: number[] | null, people: { id: number; name: stri
   if (who.length === 1) return who[0].id === me ? "yours" : `${firstName(who[0].name)}'s`;
   return who.map((p) => (p.id === me ? "You" : firstName(p.name))).join(", ");
 }
+
+// "Priya", "Priya and Rahul", "Priya, Rahul and Sam".
+export const listNames = (names: string[]) => (names.length < 2 ? names.join("") : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`);

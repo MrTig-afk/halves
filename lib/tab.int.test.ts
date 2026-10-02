@@ -1,7 +1,7 @@
 // Against a real database (the Neon dev branch), because isolation and settling are properties
 // of the SQL, not of any one function. Skipped when no DATABASE_URL is loaded (CI has none):
 //   node --env-file=.env --env-file-if-exists=.env.local node_modules/vitest/vitest.mjs run lib/tab.int.test.ts
-// Uses four fixed test people (Test Iso A..D, created once, reused), so repeated runs do not add
+// Uses fixed test people (Test Iso A..D, and E for one test, created once, reused), so repeated runs do not add
 // people. It refuses any database without the dev-only `dev_branch_marker` table: test people and
 // bills can never be deleted, so they must never reach the real database.
 import { readFileSync } from "node:fs";
@@ -385,6 +385,26 @@ describe.skipIf(!live)("the tab on a real database", async () => {
     await settleAll(A.id, B.id, 700); // B owes A 1000, A owes B 300
     expect(await pairBills(A.id, B.id)).toEqual([]); // settled shares drop off, the A-C share of abc stays with A-C
     expect((await pairBills(A.id, C.id)).map((b) => b.id)).toEqual([ac, abc]);
+    await clean();
+  }, 120_000);
+
+  it("billPeople starts a new bill with the last added bill's people, or you and the first other person on a first bill", async () => {
+    await clean();
+    const { billPeople } = await import("./people");
+    const E = await person("Test Iso E"); // a fixed test person who never adds a bill
+    const [first] = await query<{ id: number }>("select min(id)::int as id from person where id <> $1", [E.id]);
+    // E has added nothing: E, then the first other person added.
+    const none = await billPeople(E.id);
+    expect(none.start).toEqual([E.id, first.id]);
+    expect(none.all[0].id).toBe(E.id);
+    expect(none.all.slice(1).map((p) => p.id)).toEqual(none.all.slice(1).map((p) => p.id).sort((x, y) => x - y)); // you first, then by id
+    expect(Object.keys(none.all[0]).sort()).toEqual(["id", "name"]); // nothing else of a person leaves
+    // A's last added bill decides, not an older one and not someone else's.
+    await save(A, [A, B], A, [[1000, [A, B]]]);
+    await save(A, [A, C, D], A, [[3000, [A, C, D]]]);
+    await save(B, [A, B], B, [[400, [A]]]);
+    expect((await billPeople(A.id)).start).toEqual([A.id, C.id, D.id]);
+    expect((await billPeople(B.id)).start).toEqual([B.id, A.id]);
     await clean();
   }, 120_000);
 

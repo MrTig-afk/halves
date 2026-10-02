@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { dayMonth, editedAt, firstName, initial, isToday, itemLabel, localDate, shortDate } from "./names";
+import { dayMonth, editedAt, firstName, initial, isToday, itemLabel, listNames, localDate, shortDate } from "./names";
 
 describe("names and dates", () => {
   it("shortens names", () => {
@@ -58,5 +58,13 @@ describe("editedAt", () => {
   it("writes midnight and noon as 12 am and 12 pm, on the Sydney day", () => {
     expect(editedAt("2026-09-28T14:00:00Z")).toBe("29 Sep, 12:00 am");
     expect(editedAt("2026-09-29T02:05:00Z")).toBe("29 Sep, 12:05 pm");
+  });
+});
+
+describe("listNames", () => {
+  it("lists one, two and three names", () => {
+    expect(listNames(["Priya"])).toBe("Priya");
+    expect(listNames(["Priya", "Rahul"])).toBe("Priya and Rahul");
+    expect(listNames(["Priya", "Rahul", "Sam"])).toBe("Priya, Rahul and Sam");
   });
 });

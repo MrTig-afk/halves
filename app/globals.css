@@ -72,10 +72,12 @@ body {
 button {
   font: inherit;
   color: inherit;
+  touch-action: manipulation; /* no double-tap zoom on a tap target */
 }
 
 /* One phone-width column; the header and footer bars stay in reach. */
 .screen {
+  position: relative; /* the drop-down panel sits against it */
   min-height: 100%;
   max-width: 480px;
   margin: 0 auto;
@@ -463,6 +465,7 @@ button {
 }
 .plain {
   font: inherit;
+  font-size: max(16px, 1em); /* iPhone zooms into anything smaller */
   color: inherit;
   background: transparent;
   border: 0;
@@ -477,6 +480,126 @@ button {
 }
 .plain.b {
   font-weight: 700;
+}
+/* People on a bill: drop-downs with names (Artifact .dd). The list text is 16 px, so iPhone never zooms in on it. */
+.dd {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font: 600 14px var(--font);
+  color: var(--fg);
+  background: var(--bg);
+  border: 1.5px solid var(--line);
+  border-radius: 9px;
+  padding: 5px 9px;
+  cursor: pointer;
+  text-align: left;
+}
+.dd .ddv {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.dd .chev {
+  color: var(--dim);
+  font-size: 11px;
+  flex: none;
+}
+.dd:focus-visible {
+  outline: 2px solid var(--orange);
+  outline-offset: 2px;
+}
+.ddscrim {
+  position: fixed;
+  inset: 0;
+  z-index: 4;
+}
+.ddp {
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  z-index: 5;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.22);
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.ddp .ddt {
+  font: 700 13px var(--font);
+  flex: 1;
+  min-width: 0;
+}
+.ddr {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 5px 2px;
+  font: 500 16px/1.3 var(--font);
+  cursor: pointer;
+  color: var(--fg);
+}
+.ddr input {
+  width: 20px;
+  height: 20px;
+  accent-color: var(--green);
+  margin: 0;
+  flex: none;
+  cursor: pointer;
+}
+.ddr input:disabled + span {
+  color: var(--dim);
+}
+.ddp .btn {
+  margin-top: 4px;
+}
+.lab {
+  width: 72px;
+  flex: none;
+  color: var(--dim);
+}
+/* Footer: one button per person; tapping it shows how their amount was worked out */
+.fbs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 3px;
+}
+.fb {
+  font: 600 11px var(--font);
+  border: 1px solid var(--line);
+  background: var(--soft);
+  border-radius: 999px;
+  padding: 2px 8px;
+  color: var(--fg);
+  cursor: pointer;
+}
+.fb:focus-visible {
+  outline: 2px solid var(--orange);
+  outline-offset: 2px;
+}
+.bd {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 13px;
+  padding: 3px 0;
+  border-bottom: 1px solid var(--line);
+}
+.bd.tot {
+  font-weight: 800;
+  border-bottom: 0;
+  padding-top: 6px;
+}
+.bd .dim {
+  font-size: 11px;
 }
 /* Bill view: every item the viewer pays part of is tinted across the whole line, in the same orange as "You owe" */
 .li.you {

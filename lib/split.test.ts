@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { breakdown, eachCents, owes, partnerOwes, type Share, type SplitLine } from "./split";
+import { breakdown, eachCents, owes, partnerOwes, regroup, setLabel, type Share, type SplitLine } from "./split";
 
 // The master Artifact's sample receipt (Coles, total $49.94).
 const coles = (shares: Record<number, Share>): SplitLine[] => {
@@ -233,5 +233,36 @@ describe("eachCents", () => {
   it("is the item over its set size, discounts included, half up", () => {
     expect(eachCents(case9, 0)).toBe(103); // milk 310 / 3
     expect(eachCents(case9, 4)).toBe(333); // chicken 1200 - 200 over 3
+  });
+});
+
+describe("regroup", () => {
+  it("keeps an item that was Everyone as Everyone when someone is added", () => {
+    expect(regroup([1, 2], [1, 2], [1, 2, 4])).toEqual([1, 2, 4]);
+    expect(regroup([2, 1], [1, 2], [1, 2, 4])).toEqual([1, 2, 4]); // order never decides "everyone"
+  });
+  it("takes anyone removed from the bill off every item", () => {
+    expect(regroup([1, 2, 3], [1, 2, 3], [1, 2])).toEqual([1, 2]); // Everyone, Rahul (3) removed
+    expect(regroup([2, 3], [1, 2, 3, 4], [1, 2, 4])).toEqual([2]);
+  });
+  it("sends an item left with nobody back to Everyone", () => {
+    expect(regroup([3], [1, 2, 3], [1, 2])).toEqual([1, 2]);
+  });
+  it("leaves a set that is not Everyone and loses nobody alone", () => {
+    expect(regroup([1, 2], [1, 2, 3], [1, 2, 3, 4])).toEqual([1, 2]);
+  });
+});
+
+describe("setLabel", () => {
+  const four = [{ id: 1, name: "Kaushik Rao" }, { id: 2, name: "Priya Shah" }, { id: 3, name: "Rahul" }, { id: 4, name: "Sam" }];
+  it("says Everyone when the set is everyone on the bill", () => {
+    expect(setLabel([1, 2], four.slice(0, 2), 1)).toBe("Everyone");
+    expect(setLabel([4, 3, 2, 1], four, 1)).toBe("Everyone");
+  });
+  it("says Me for the signed-in person and first names for the rest, in people order", () => {
+    expect(setLabel([1], four, 1)).toBe("Me");
+    expect(setLabel([2, 3, 4], four, 1)).toBe("Priya, Rahul, Sam");
+    expect(setLabel([2, 1], four, 1)).toBe("Me, Priya");
+    expect(setLabel([2, 3], four, 3)).toBe("Priya, Me");
   });
 });

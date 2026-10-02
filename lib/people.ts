@@ -32,3 +32,16 @@ export async function resetPin(me: number, id: number): Promise<boolean> {
   const [r] = await query<{ reset: boolean }>("select admin_reset_pin($1) as reset", [id], me);
   return r.reset;
 }
+
+// Who a new bill starts with: the people of the signed-in person's last added bill, or on a first
+// bill themselves and the first other person added. `all` is everyone, you first then by id (the
+// order the pickers show); `start` is the ids to tick. Names only: nothing else of a person leaves.
+export async function billPeople(me: number): Promise<{ all: { id: number; name: string }[]; start: number[] }> {
+  const [every, last] = await Promise.all([
+    people(),
+    query<{ id: number }>("select person_id::int as id from bill_person where bill_id = (select id from bill where added_by = $1 order by id desc limit 1)", [me], me),
+  ]);
+  const all = every.map((p) => ({ id: p.id, name: p.name })).sort((a, b) => Number(b.id === me) - Number(a.id === me) || a.id - b.id);
+  const on = all.filter((p) => last.some((l) => l.id === p.id));
+  return { all, start: (on.length ? on : all.slice(0, 2)).map((p) => p.id) };
+}
