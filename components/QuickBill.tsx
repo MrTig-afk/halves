@@ -4,7 +4,7 @@
 // full. Saved as an ordinary bill with one line named as the bill - no photo, no AI reading.
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useState, useSyncExternalStore } from "react";
 import type { Partner, SavedBill } from "@/components/Review";
 import { Saved, today, uuid } from "@/components/ScanFlow";
 import { postBill } from "@/lib/api";
@@ -14,13 +14,35 @@ import { firstName } from "@/lib/names";
 import { partnerOwes } from "@/lib/split";
 
 type Share = "split" | "partner";
+const noChange = () => () => {};
+// The scan id of a save that may have reached the server, kept on this phone (even when the app is
+// closed) until its outcome is known. The next bill goes out under it: if the first save landed,
+// the server answers with that stored bill instead of saving a second one.
+const PENDING = "halves:add-pending";
+const pendingId = () => {
+  try {
+    return localStorage.getItem(PENDING);
+  } catch {
+    return null; // the server, or storage blocked
+  }
+};
+const remember = (id: string | null) => {
+  try {
+    if (id) localStorage.setItem(PENDING, id);
+    else localStorage.removeItem(PENDING);
+  } catch {}
+};
 
 export function QuickBill({ partners }: { partners: Partner[] }) {
   const router = useRouter();
-  const [scanId, setScanId] = useState(uuid); // one per bill: a retried Save can never add it twice
+  const [scanId, setScanId] = useState(() => pendingId() ?? uuid()); // one per bill: a retried Save can never add it twice
   const [description, setDescription] = useState("");
   const [amount, setAmount] = useState("");
-  const [date, setDate] = useState(today);
+  // Until a date is picked, today on this phone's clock - never the server's, which renders in UTC
+  // and is still on yesterday in an Australian morning.
+  const [picked, setPicked] = useState<string | null>(null);
+  const now = useSyncExternalStore(noChange, today, () => "");
+  const date = picked ?? now;
   const [partnerId, setPartnerId] = useState(partners[0]?.id ?? 0);
   const [share, setShare] = useState<Share>("split");
   const [saving, setSaving] = useState(false);
@@ -37,21 +59,38 @@ export function QuickBill({ partners }: { partners: Partner[] }) {
   const locked = saving || !!saveError?.retry;
   const canSave = !saving && !!partner && description.trim() !== "" && cents !== null && date !== "";
 
-  const save = async () => {
+  const save = async (id = scanId) => {
     if (cents === null) return;
     setSaving(true);
     setSaveError(null);
+    remember(id);
     const name = description.trim();
     const r = await postBill(
-      { scan_id: scanId, partner_id: partnerId, description: name, date, total_cents: cents, lines: [{ name, price_cents: cents, kind: "item", share }], ai: null, typed: true },
+      { scan_id: id, partner_id: partnerId, description: name, date, total_cents: cents, lines: [{ name, price_cents: cents, kind: "item", share }], ai: null, typed: true },
       null,
     );
     setSaving(false);
+    // An answer settles the id. A conflict means it is someone else's (left by whoever used this
+    // phone before): nothing was saved, so this bill goes again under its own. Any other refusal
+    // comes before the save and leaves the id's outcome open, so it is kept.
+    if (!r.ok && r.error === "conflict") {
+      remember(null);
+      const fresh = uuid();
+      setScanId(fresh);
+      return save(fresh);
+    }
+    if (r.ok) remember(null);
+    if (r.ok && r.duplicate && !r.same) {
+      // An earlier, different bill held the id: that one is saved, this one is not yet.
+      setScanId(uuid());
+      return setSaveError({ text: `Your earlier bill "${r.description}" ${formatCents(r.total_cents)} was saved. This one isn't yet - tap Save.`, retry: false });
+    }
     if (r.ok) {
       const stored = partners.find((p) => p.id === r.partner_id);
       return setSaved({ description: r.description, partnerName: stored ? firstName(stored.name) : partnerName, owes: r.owes, was: r.was, photo: r.photo, notified: r.notified });
     }
     if (r.error === "signed_out") return router.replace("/signin");
+    if (r.retryable) setPicked(date); // Retry sends exactly this, even after midnight
     setSaveError(r.retryable ? { text: "Couldn't save. Check your connection and try again. Nothing you entered is lost.", retry: true } : { text: r.message, retry: false });
   };
 
@@ -60,7 +99,7 @@ export function QuickBill({ partners }: { partners: Partner[] }) {
       setScanId(uuid());
       setDescription("");
       setAmount("");
-      setDate(today());
+      setPicked(null);
       setShare("split");
       setSaved(null);
     };
@@ -102,7 +141,7 @@ export function QuickBill({ partners }: { partners: Partner[] }) {
             ))}
           </select>
           <span className="grow" />
-          <input className="plain dim num" type="date" value={date} onChange={(e) => setDate(e.target.value)} aria-label="Date" />
+          <input className="plain dim num" type="date" value={date} onChange={(e) => setPicked(e.target.value)} aria-label="Date" />
         </div>
         <div className="lbl">How to split</div>
         <div className="row" role="group" aria-label="How to split">
@@ -121,7 +160,7 @@ export function QuickBill({ partners }: { partners: Partner[] }) {
             <div className="xs dim">{partnerName} owes you</div>
             <div className={cents === null ? "amt num dim" : "amt owed num"}>{formatCents(owes)}</div>
           </div>
-          <button type="button" className="btn sm" style={{ flex: "none" }} disabled={!canSave} onClick={save}>
+          <button type="button" className="btn sm" style={{ flex: "none" }} disabled={!canSave} onClick={() => save()}>
             {saving ? "Saving…" : saveError?.retry ? "Retry" : "Save"}
           </button>
         </div>

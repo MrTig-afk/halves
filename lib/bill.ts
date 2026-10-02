@@ -22,10 +22,13 @@ export type NewBill = {
 // gets notifications, so "<Partner> has been notified." is true.
 export type Saved = {
   duplicate: boolean;
+  same: boolean; // the stored bill is this one (false: an earlier, different bill holds the scan id)
   photo: "kept" | "not_kept_full" | "none";
   owes: number;
   partner_id: number;
   description: string;
+  total_cents: number;
+  date: string;
   was: number;
   notified: boolean;
 };
