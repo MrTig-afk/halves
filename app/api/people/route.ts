@@ -14,7 +14,7 @@ export async function POST(req: Request) {
     if (e instanceof PeopleError) return fail(400, "bad_name", "Use 1 to 40 characters, with at least one letter.");
     throw e;
   }
-  const id = await addPerson(name);
+  const id = await addPerson(me.id, name);
   if (id === null) return fail(409, "taken", `There is already a tile called ${name}.`);
   return Response.json({ id, name });
 }

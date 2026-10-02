@@ -28,11 +28,14 @@ describe("/api/push", () => {
   });
 
   it("saves this phone's subscription for this person and session, one per session", async () => {
+    query.mockResolvedValue([{ ok: true }]);
     expect(await (await send("POST", { endpoint, keys })).json()).toEqual({ on: true });
-    const [sql, params] = query.mock.calls[0];
-    expect(sql).toMatch(/delete from push_subscription where session_id = \$2 and endpoint <> \$3/);
-    expect(sql).toMatch(/on conflict \(endpoint\) do update/);
-    expect(params).toEqual([4, SESSION, endpoint, keys.p256dh, keys.auth]);
+    expect(query.mock.calls[0]).toEqual(["select save_push($1::uuid, $2, $3, $4) as ok", [SESSION, endpoint, keys.p256dh, keys.auth], 4]);
+  });
+
+  it("answers signed out when save_push says this session no longer signs the person in", async () => {
+    query.mockResolvedValue([{ ok: false }]);
+    expect((await send("POST", { endpoint, keys })).status).toBe(401);
   });
 
   it("refuses an endpoint that is not a browser push service, and malformed keys", async () => {
@@ -53,10 +56,11 @@ describe("/api/push", () => {
   it("reports on only for this session's subscription, and removes only the person's own", async () => {
     expect(await (await GET(new Request(`http://x/api/push?endpoint=${encodeURIComponent(endpoint)}`))).json()).toEqual({ on: true });
     expect(query.mock.calls[0][1]).toEqual([endpoint, SESSION]);
+    expect(query.mock.calls[0][2]).toBe(4); // the person is passed, so row-level security backs the filter up
     query.mockClear();
     expect(await (await GET(new Request("http://x/api/push?endpoint=https://evil.com/x"))).json()).toEqual({ on: false });
     expect(query).not.toHaveBeenCalled();
     await send("DELETE", { endpoint });
-    expect(query.mock.calls[0]).toEqual(["delete from push_subscription where endpoint = $1 and person_id = $2", [endpoint, 4]]);
+    expect(query.mock.calls[0]).toEqual(["delete from push_subscription where endpoint = $1 and person_id = $2", [endpoint, 4], 4]);
   });
 });

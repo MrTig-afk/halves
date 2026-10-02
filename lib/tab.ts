@@ -127,11 +127,9 @@ export async function bill(id: number, me: number): Promise<Bill | null> {
             to_char(b.date_edited_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') as date_edited_at,
             to_char(b.total_edited_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') as total_edited_at,
             case when exists (select 1 from bill_person q where q.bill_id = b.id and ${OPEN}) then null
-                 else coalesce((select max(s.created_at) from bill_person q join settlement s on s.id = q.settlement_id where q.bill_id = b.id), b.created_at)::text end as settled_at,
+                 else coalesce((select max(q.settled_at) from bill_person q where q.bill_id = b.id), b.created_at)::text end as settled_at,
             (select coalesce(jsonb_agg(jsonb_build_object('person_id', q.person_id, 'name', pe.name, 'owes_cents', q.owes_cents,
-               'settled_at', case when q.person_id = b.payer_id then null
-                                  when q.settlement_id is not null then (select s.created_at::text from settlement s where s.id = q.settlement_id)
-                                  when q.owes_cents = 0 then b.created_at::text end) order by q.person_id), '[]'::jsonb)
+               'settled_at', q.settled_at::text) order by q.person_id), '[]'::jsonb)
              from bill_person q join person pe on pe.id = q.person_id where q.bill_id = b.id) as people
      from ${BILL_FROM} join person ad on ad.id = coalesce(b.added_by, b.payer_id)
      where b.id = $2 and ${MEMBER}`,
@@ -180,10 +178,10 @@ export async function settleAll(
        select least($1::bigint, $2::bigint), greatest($1::bigint, $2::bigint), abs(b),
               case when b > 0 then $2::bigint else $1::bigint end, case when b > 0 then $1::bigint else $2::bigint end, $1
        from bal where b <> 0 and b = $3
-       returning id
+       returning id, created_at
      ),
      u as (
-       update bill_person set settlement_id = s.id from s
+       update bill_person set settlement_id = s.id, settled_at = s.created_at from s
        where (bill_person.bill_id, bill_person.person_id) in (select bill_id, person_id from pair)
        returning 1
      )

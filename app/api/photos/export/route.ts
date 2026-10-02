@@ -22,14 +22,14 @@ export async function GET(req: Request) {
   const list = await listPhotos(me.id, upto);
   const month = localDate(new Date().toISOString()).slice(0, 7);
   const sent: number[] = [];
-  const chunks = zip(exportPhotos(list, sent));
+  const chunks = zip(exportPhotos(me.id, list, sent));
   // Hand-built (ReadableStream.from is not in the installed TS types). The stamp waits until the
   // last chunk, the zip's directory, has been read; a cancelled or failed stream never gets there.
   const body = new ReadableStream<Uint8Array>({
     async pull(controller) {
       const { value, done } = await chunks.next();
       if (!done) return controller.enqueue(value);
-      await stampExport(sent, token);
+      await stampExport(me.id, sent, token);
       controller.close();
     },
     async cancel() {

@@ -20,26 +20,15 @@ export function tileName(raw: unknown): string {
 
 // A new, unclaimed tile: whoever taps it first sets its PIN. null when the name is taken, in any
 // letter case (a unique index on lower(name)), so "rahul" never sits beside "Rahul".
-export async function addPerson(name: string): Promise<number | null> {
-  const [r] = await query<{ id: number }>(
-    "insert into person (name, role) values ($1, 'member') on conflict do nothing returning id::int",
-    [name],
-  );
+export async function addPerson(me: number, name: string): Promise<number | null> {
+  const [r] = await query<{ id: number | null }>("select admin_add_person($1)::int as id", [name], me);
   return r?.id ?? null;
 }
 
 // Back to an unclaimed tile, signed out on every phone - and so with no phone left receiving its
 // notifications (a subscription goes with its session) - in one statement. An admin tile is never reset this way (the admin changes their
 // own PIN), or the admin tile could be claimed by whoever tapped it first.
-export async function resetPin(id: number): Promise<boolean> {
-  const [r] = await query<{ reset: boolean }>(
-    `with p as (
-       update person set pin_hash = null, pin_stamp = gen_random_uuid(), failed_pin_count = 0, locked_until = null, claimed_at = null
-       where id = $1 and role = 'member' returning id
-     ),
-     s as (delete from device_session where person_id in (select id from p) returning 1)
-     select exists (select 1 from p) as reset`,
-    [id],
-  );
+export async function resetPin(me: number, id: number): Promise<boolean> {
+  const [r] = await query<{ reset: boolean }>("select admin_reset_pin($1) as reset", [id], me);
   return r.reset;
 }

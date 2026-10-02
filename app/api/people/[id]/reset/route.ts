@@ -10,6 +10,6 @@ export async function POST(_req: Request, ctx: { params: Promise<{ id: string }>
   if (!me) return fail(401, "signed_out", "Sign in again.");
   if (me.role !== "admin") return fail(403, "admin_only", "Only the admin can reset a PIN.");
   const id = idParam((await ctx.params).id);
-  if (id === null || !(await resetPin(id))) return fail(404, "not_found", "That tile can't be reset.");
+  if (id === null || !(await resetPin(me.id, id))) return fail(404, "not_found", "That tile can't be reset.");
   return Response.json({ ok: true });
 }

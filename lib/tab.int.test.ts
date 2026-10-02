@@ -68,10 +68,11 @@ describe.skipIf(!live)("the tab on a real database", async () => {
     who.current = p;
     return (await photo(new Request("http://x"), { params: Promise.resolve({ id: String(id) }) })).status;
   };
-  let A: Person, B: Person, C: Person, D: Person;
+  let A: Person, B: Person, C: Person, D: Person, ADMIN: Person;
 
   const person = async (name: string): Promise<Person> => {
-    await query("insert into person (name, role) values ($1, 'member') on conflict (name) do nothing", [name]);
+    const [a] = await query<{ id: number }>("select id::int as id from person where role = 'admin' limit 1");
+    await query("select admin_add_person($1)", [name], a.id); // the app role may not insert a tile itself; null when it exists
     const [p] = await query<Person>("select id::int as id, name, role from person where name = $1", [name]);
     return p;
   };
@@ -121,6 +122,8 @@ describe.skipIf(!live)("the tab on a real database", async () => {
     // The immutability checks really try an UPDATE and a DELETE; only the app role is refused them.
     if (marker.role !== "halves_app") throw new Error(`Refusing to run as ${marker.role}: connect as halves_app.`);
     [A, B, C, D] = [await person("Test Iso A"), await person("Test Iso B"), await person("Test Iso C"), await person("Test Iso D")];
+    [ADMIN] = await query<Person>("select id::int as id, name, role from person where role = 'admin' limit 1"); // the photo export is the admin's
+    if (!ADMIN) throw new Error("No admin tile on the dev branch.");
     await clean(); // start from a clean tab
   }, 120_000);
 
@@ -250,7 +253,7 @@ describe.skipIf(!live)("the tab on a real database", async () => {
   it("ends a phone's notifications with its session (sign out, PIN change, PIN reset)", async () => {
     const [s] = await query<{ id: string }>("insert into device_session (person_id, pin_stamp) select id, pin_stamp from person where id = $1 returning id", [A.id]);
     const endpoint = `https://fcm.googleapis.com/fcm/send/int-test-${s.id}`;
-    await query("insert into push_subscription (person_id, session_id, endpoint, p256dh, auth) values ($1, $2, $3, 'p', 'a')", [A.id, s.id, endpoint], A.id);
+    await query("select save_push($1::uuid, $2, 'p', 'a')", [s.id, endpoint], A.id);
     await query("delete from device_session where id = $1", [s.id]);
     expect(await query("select 1 from push_subscription where endpoint = $1", [endpoint], A.id)).toEqual([]);
   }, 120_000);
@@ -265,9 +268,18 @@ describe.skipIf(!live)("the tab on a real database", async () => {
     await denied("update bill set total_cents = 1 where id = $1", /permission denied/);
     await denied("update bill set date_edited_at = now() where id = $1", /permission denied/);
     await denied("update bill set total_edited_at = now() where id = $1", /permission denied/);
+    await denied("update bill set settlement_id = null where id = $1", /permission denied/); // a share is settled on bill_person, never on the bill
     await denied("update bill_person set settlement_id = null where bill_id = $1 and settlement_id is not null", /already settled/);
     await denied("delete from bill where id = $1", /permission denied/);
     await denied("delete from bill_person where bill_id = $1", /permission denied/);
+    // an open share cannot be given a settle time without its round
+    const open = await save(A, [A, B], A, [[1000, [A, B]]]);
+    await expect(query("update bill_person set settled_at = now() where bill_id = $1 and person_id = $2", [open, B.id], A.id)).rejects.toThrow(/not settled/);
+    // nor can the app role stamp a settle time on the payer's own row, or on a $0.00 share (settled at save)
+    await expect(query("update bill_person set settled_at = now() where bill_id = $1 and person_id = $2", [open, A.id], A.id)).rejects.toThrow(/only with its round/);
+    const zero = await save(A, [A, B, C], A, [[1000, [A, B]]]); // C had nothing: a $0.00 share
+    await expect(query("update bill_person set settled_at = now() where bill_id = $1 and person_id = $2", [zero, C.id], A.id)).rejects.toThrow(/already settled/); // stamped at save, so it is settled for good
+    await expect(query("update bill_person set settled_at = null where bill_id = $1 and person_id = $2", [zero, C.id], A.id)).rejects.toThrow(/already settled/); // and never undone
     await denied("delete from line_item_person where line_item_id in (select id from line_item where bill_id = $1)", /permission denied/);
     expect((await shares(id, A)).find((x) => x.person_id === B.id)).toMatchObject({ owes_cents: 500 });
   }, 120_000);
@@ -343,4 +355,168 @@ describe.skipIf(!live)("the tab on a real database", async () => {
     expect(n.none).toBe(true);
     await clean();
   }, 120_000);
+
+  it("shows C, on an A-B-C bill, when A-B settled, though C may not see the settlement", async () => {
+    await clean();
+    const id = await save(A, [A, B, C], A, [[3000, [A, B, C]]]);
+    const r = await settleAll(A.id, B.id, 1000);
+    const [s] = await query<{ at: string }>("select created_at::text as at from settlement where id = $1", [r.id], A.id);
+    const asC = (await bill(id, C.id))!;
+    expect(asC.people.find((p) => p.person_id === B.id)!.settled_at).toBe(s.at); // the round's moment, read from the share
+    expect(asC.people.find((p) => p.person_id === C.id)!.settled_at).toBeNull(); // A-C is still open
+    expect(asC.settled_at).toBeNull();
+    expect(await query("select 1 from settlement where id = $1", [r.id], C.id)).toEqual([]); // the settlement itself stays the pair's
+    await settleAll(A.id, C.id, 1000);
+    expect((await bill(id, C.id))!.settled_at).not.toBeNull();
+    await clean();
+  }, 120_000);
+
+  // S1: row-level security (PRD 10.4). Each of these runs the real app role against hand-written SQL.
+  describe("row-level security", () => {
+    const TABLES = ["bill", "bill_person", "line_item", "line_item_person", "receipt_photo", "settlement", "scan_request", "push_subscription"];
+    const rows = (sql: string, params: unknown[], as: Person) => query(sql, params, as.id);
+    const refuses = (sql: string, params: unknown[], as: Person, message: RegExp) => expect(rows(sql, params, as)).rejects.toThrow(message);
+    // An A-B bill saved with a photo and settled once, so every table has rows A can see.
+    const seeded = async () => {
+      await clean();
+      const id = await save(A, [A, B], A, [[1000, [A, B]], [400, [A]]], { photo: true });
+      const r = await settleAll(A.id, B.id, 500);
+      return { id, round: r.id! };
+    };
+
+    it("1. shows nothing without a setting, and rows with one", async () => {
+      await seeded();
+      for (const t of TABLES) {
+        expect(await query(`select 1 from ${t} limit 1`), `${t} without a setting`).toEqual([]);
+      }
+      for (const t of ["bill", "bill_person", "line_item", "line_item_person", "settlement", "scan_request"]) {
+        expect((await query(`select 1 from ${t} limit 1`, [], A.id)).length, `${t} under A`).toBe(1);
+      }
+    }, 120_000);
+
+    it("2. gives C an empty answer to hand-written queries on an A-B bill, and A its rows", async () => {
+      const { id, round: sid } = await seeded();
+      const lines = await rows("select id::int from line_item where bill_id = $1", [id], A);
+      const ids = lines.map((l) => (l as { id: number }).id);
+      expect(ids.length).toBe(2);
+      const q: [string, unknown[]][] = [
+        ["select * from bill where id = $1", [id]],
+        ["select * from bill_person where bill_id = $1", [id]],
+        ["select * from line_item where bill_id = $1", [id]],
+        ["select * from line_item_person where line_item_id = any($1::bigint[])", [ids]],
+        ["select * from receipt_photo where bill_id = $1", [id]],
+        ["select * from settlement where id = $1", [sid]],
+      ];
+      for (const [sql, params] of q) {
+        expect(await rows(sql, params, C), `C: ${sql}`).toEqual([]);
+        expect((await rows(sql, params, A)).length, `A: ${sql}`).toBeGreaterThan(0);
+        expect((await rows(sql, params, D)).length, `D: ${sql}`).toBe(0);
+      }
+    }, 120_000);
+
+    it("3. refuses a bill added as someone else, and a share put on a bill by someone who did not add it", async () => {
+      const { id } = await seeded();
+      const ins = "insert into bill (payer_id, added_by, description, bill_date, total_cents) values ($1, $2, 'rls', '2026-09-29', 100)";
+      await refuses(ins, [A.id, B.id], A, /row-level security/);
+      await refuses("insert into bill_person (bill_id, person_id, owes_cents) values ($1, $2, 0)", [id, D.id], B, /row-level security/); // B is on it, but did not add it
+      await refuses("insert into bill_person (bill_id, person_id, owes_cents) values ($1, $2, 0)", [id, D.id], D, /row-level security/);
+      await refuses("insert into settlement (person_low_id, person_high_id, amount_cents, from_person_id, to_person_id, settled_by) values ($1, $2, 1, $3, $4, $3)", [A.id, B.id, B.id, A.id], C, /row-level security/);
+      expect(await shares(id, A)).toHaveLength(2);
+    }, 120_000);
+
+    it("4. refuses the app role what its column grants no longer allow", async () => {
+      const { id } = await seeded();
+      const none = "00000000-0000-0000-0000-000000000000";
+      await refuses("update person set role = 'admin' where id = $1", [C.id], A, /permission denied/);
+      await refuses("insert into person (name, role) values ('Test Iso Admin', 'admin')", [], A, /permission denied/);
+      await refuses("insert into person (name) values ('Test Iso Nobody')", [], A, /permission denied/); // tiles come from admin_add_person only
+      await refuses("update receipt_photo set jpeg = '\\x00' where id = -1", [], A, /permission denied/);
+      await refuses("update receipt_photo set bill_id = $1 where id = -1", [id], A, /permission denied/);
+      await refuses("update device_session set person_id = $1 where id = $2::uuid", [A.id, none], A, /permission denied/);
+      await refuses("update person set email = 'x@y.z' where id = $1", [A.id], A, /permission denied/);
+    }, 120_000);
+
+    it("5. keeps A's scan requests and push subscriptions from B", async () => {
+      const { id } = await seeded();
+      const [s] = await query<{ id: string }>("insert into device_session (person_id, pin_stamp) select id, pin_stamp from person where id = $1 returning id", [A.id]);
+      const endpoint = `https://fcm.googleapis.com/fcm/send/rls-test-${s.id}`;
+      await rows("select save_push($1::uuid, $2, 'p', 'a')", [s.id, endpoint], A);
+      // The table itself takes no writes from the app role: a subscription arrives only through save_push.
+      await refuses("insert into push_subscription (person_id, session_id, endpoint, p256dh, auth) values ($1, $2, 'https://x.invalid/y', 'p', 'a')", [A.id, s.id], A, /permission denied/);
+      await refuses("update push_subscription set p256dh = 'z' where endpoint = $1", [endpoint], A, /permission denied/);
+      expect((await rows("select 1 from scan_request where bill_id = $1", [id], A)).length).toBe(1);
+      expect((await rows("select 1 from push_subscription where endpoint = $1", [endpoint], A)).length).toBe(1);
+      expect(await rows("select 1 from scan_request where bill_id = $1", [id], B)).toEqual([]);
+      expect(await rows("select 1 from push_subscription where endpoint = $1", [endpoint], B)).toEqual([]);
+      await rows("delete from push_subscription where endpoint = $1", [endpoint], B); // not B's: deletes nothing
+      expect((await rows("select 1 from push_subscription where endpoint = $1", [endpoint], A)).length).toBe(1);
+      await query("delete from device_session where id = $1", [s.id]);
+    }, 120_000);
+
+    it("6. saves a subscription through save_push, and it ends with its session", async () => {
+      const [s] = await query<{ id: string }>("insert into device_session (person_id, pin_stamp) select id, pin_stamp from person where id = $1 returning id", [A.id]);
+      const endpoint = `https://fcm.googleapis.com/fcm/send/rls-sp-${s.id}`;
+      expect((await rows("select save_push($1::uuid, $2, 'k', 'a') as ok", [s.id, endpoint], A))[0]).toEqual({ ok: true });
+      expect((await rows("select 1 from push_subscription where endpoint = $1", [endpoint], A)).length).toBe(1);
+      await query("delete from device_session where id = $1", [s.id]);
+      expect(await rows("select 1 from push_subscription where endpoint = $1", [endpoint], A)).toEqual([]);
+      // Signing in (checkPin, startSession, currentPerson) is exercised against RLS by lib/session.int.test.ts.
+    }, 120_000);
+
+    it("7. still exports and archives a photo: stamped, deleted, the bill says archived - the admin on the bill only", async () => {
+      const { exportPhotos, listPhotos, stampExport, archiveExport } = await import("./photos");
+      await clean();
+      const id = await save(A, [A, ADMIN], A, [[1000, [A, ADMIN]]], { photo: true });
+      await settle(A, ADMIN); // leave no tab behind
+      const upto = (await rows("select max(id)::int as m from receipt_photo", [], ADMIN))[0] as { m: number };
+      expect((await listPhotos(C.id, upto.m)).filter((p) => p.bill_id === id)).toEqual([]); // C is not on it
+      const list = (await listPhotos(ADMIN.id, upto.m)).filter((p) => p.bill_id === id);
+      expect(list).toHaveLength(1);
+      const sent: number[] = [];
+      let n = 0;
+      for await (const e of exportPhotos(ADMIN.id, list, sent)) n += e.data.length > 0 ? 1 : 0;
+      expect([n, sent]).toEqual([1, [list[0].id]]);
+      const token = Date.now();
+      await stampExport(C.id, sent, token); // not C's photo: stamps nothing
+      await stampExport(A.id, sent, token); // A is on the bill but is not the admin: stamps nothing
+      expect(await archiveExport(ADMIN.id, upto.m, token)).toBe(0);
+      await stampExport(ADMIN.id, sent, token);
+      expect(await archiveExport(C.id, upto.m, token)).toBe(0); // C cannot delete it
+      expect(await archiveExport(A.id, upto.m, token)).toBe(0); // nor can a member who is not the admin
+      expect(await photoAs(A, id)).toBe(200);
+      expect(await archiveExport(ADMIN.id, upto.m, token)).toBe(1);
+      expect((await bill(id, A.id))!.photo_state).toBe("archived");
+      expect(await photoAs(A, id)).toBe(404);
+    }, 120_000);
+
+    it("8. refuses a share a round that is not between its person and the bill's payer", async () => {
+      await clean();
+      await save(C, [C, D], C, [[1000, [C, D]]]);
+      const cd = (await settleAll(C.id, D.id, 500)).id!;
+      await save(A, [A, C], A, [[1000, [A, C]]]);
+      const ac = (await settleAll(A.id, C.id, 500)).id!;
+      await save(A, [A, B], A, [[1000, [A, B]]]);
+      const old = (await settleAll(A.id, B.id, 500)).id!; // an earlier A-B round
+      const ab = await save(A, [A, B], A, [[1000, [A, B]]]);
+      const give = "update bill_person set settlement_id = $1, settled_at = now() where bill_id = $2 and person_id = $3";
+      await refuses(give, [cd, ab, B.id], B, /row-level security/); // someone else's round, not even visible to B
+      await refuses(give, [ac, ab, B.id], A, /row-level security/); // a round A can see, between A and C
+      await refuses(give, [old, ab, B.id], B, /row-level security/); // the right pair, but an older round: only one made in this very transaction fits
+      expect((await shares(ab, A)).find((x) => x.person_id === B.id)!.settlement_id).toBeNull();
+      expect(await settleAll(A.id, B.id, 500)).toMatchObject({ amount_cents: 500, bills: 1 }); // the real settle still works
+    }, 120_000);
+
+    it("9. lets only the admin on a bill stamp, delete or archive its photo", async () => {
+      await clean();
+      const id = await save(A, [A, B], A, [[1000, [A, B]]], { photo: true });
+      expect(await rows("delete from receipt_photo where bill_id = $1 returning 1", [id], A)).toEqual([]);
+      expect(await rows("delete from receipt_photo where bill_id = $1 returning 1", [id], B)).toEqual([]);
+      expect(await rows("update receipt_photo set exported_at = now() where bill_id = $1 returning 1", [id], A)).toEqual([]);
+      expect(await rows("update bill set photo_state = 'archived' where id = $1 returning 1", [id], A)).toEqual([]);
+      expect(await rows("update bill set photo_state = 'archived' where id = $1 returning 1", [id], ADMIN)).toEqual([]); // the admin, but not on this bill
+      expect((await rows("select 1 from receipt_photo where bill_id = $1", [id], A)).length).toBe(1);
+      expect((await bill(id, A.id))!.photo_state).toBe("kept");
+      await settle(A, B);
+    }, 120_000);
+  });
 });

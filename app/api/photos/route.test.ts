@@ -35,7 +35,7 @@ describe("photo export", () => {
 
   it("lists the admin's photos up to the id first, then streams them as a zip under the export's token", async () => {
     listPhotos.mockResolvedValueOnce([{ id: 3 }]);
-    exportPhotos.mockImplementation(async function* (_list: unknown, sent: number[]) {
+    exportPhotos.mockImplementation(async function* (_me: unknown, _list: unknown, sent: number[]) {
       sent.push(3);
       yield { name: "a.jpg", data: Buffer.from("x"), date: new Date("2026-09-29T00:00:00Z") };
     });
@@ -46,13 +46,13 @@ describe("photo export", () => {
     const bytes = Buffer.from(await res.arrayBuffer());
     expect(bytes.readUInt32LE(0)).toBe(0x04034b50);
     expect(listPhotos).toHaveBeenCalledWith(1, 7);
-    expect(exportPhotos).toHaveBeenCalledWith([{ id: 3 }], [3]);
-    expect(stampExport).toHaveBeenCalledWith([3], 1790000000123); // only once the directory was read
+    expect(exportPhotos).toHaveBeenCalledWith(1, [{ id: 3 }], [3]);
+    expect(stampExport).toHaveBeenCalledWith(1, [3], 1790000000123); // only once the directory was read
   });
 
   it("stamps nothing when the download is cancelled before the end", async () => {
     listPhotos.mockResolvedValueOnce([{ id: 3 }, { id: 4 }]);
-    exportPhotos.mockImplementation(async function* (_list: unknown, sent: number[]) {
+    exportPhotos.mockImplementation(async function* (_me: unknown, _list: unknown, sent: number[]) {
       for (const id of [3, 4]) {
         sent.push(id);
         yield { name: `${id}.jpg`, data: Buffer.alloc(10), date: new Date("2026-09-29T00:00:00Z") };

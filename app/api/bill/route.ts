@@ -33,8 +33,8 @@ const SAVE = `
   ),
   s as (insert into scan_request (scan_id, person_id, bill_id) select $1, $2, b.id from b returning 1),
   bp as (
-    insert into bill_person (bill_id, person_id, owes_cents)
-    select b.id, ppl.person_id, ppl.owes from b, ppl returning 1
+    insert into bill_person (bill_id, person_id, owes_cents, settled_at)
+    select b.id, ppl.person_id, ppl.owes, case when ppl.person_id <> $3::bigint and ppl.owes = 0 then now() end from b, ppl returning 1
   ),
   l as (
     insert into line_item (bill_id, position, name, price_cents, kind)

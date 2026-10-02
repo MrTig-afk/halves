@@ -17,6 +17,7 @@ describe.skipIf(!process.env.DATABASE_URL)("sessions and PIN changes on a real d
   const { currentPerson, startSession } = await import("./session");
   const { POST: changePin } = await import("@/app/api/auth/change-pin/route");
   let tile: number;
+  let admin: number; // the PIN reset is the admin's, through a database function
 
   // One phone's sign-in with a PIN that has been checked already (the stamp read with it).
   const signIn = async (stamp: string) => {
@@ -50,24 +51,25 @@ describe.skipIf(!process.env.DATABASE_URL)("sessions and PIN changes on a real d
   beforeAll(async () => {
     const [marker] = await query<{ dev: boolean }>("select to_regclass('public.dev_branch_marker') is not null as dev");
     if (!marker.dev) throw new Error("Refusing to run: this is not the dev branch (no dev_branch_marker table).");
-    await query("insert into person (name, role) values ('Test Race', 'member') on conflict (name) do nothing");
+    [{ id: admin }] = await query<{ id: number }>("select id::int from person where role = 'admin' limit 1");
+    await query("select admin_add_person('Test Race')", [], admin); // the app role may not insert a tile itself
     [{ id: tile }] = await query<{ id: number }>("select id::int from person where name = 'Test Race'");
   }, 60_000);
   beforeEach(async () => {
-    await resetPin(tile); // unclaimed, no sessions
+    await resetPin(admin, tile); // unclaimed, no sessions
   }, 60_000);
 
   it("an admin reset between the PIN check and the session", async () => {
     await claimed("4321");
     const stale = await checked("4321");
-    await resetPin(tile);
+    await resetPin(admin, tile);
     await refused(stale);
   }, 60_000);
 
   it("a reset and a new claim between the PIN check and the session", async () => {
     await claimed("4321");
     const stale = await checked("4321");
-    await resetPin(tile);
+    await resetPin(admin, tile);
     const fresh = await claimed("8765"); // someone else takes the tile
     await refused(stale);
     expect(await who(await signIn(fresh))).toBe(tile); // the new owner's own sign-in works

@@ -52,12 +52,14 @@ const slug = (s: string) =>
 
 // The listed photos, ten per database round trip, named <date>_<bill id>_<description>.jpg and
 // dated on the roommates' clock. Each one handed over is added to `sent`.
-export async function* exportPhotos(list: Listed[], sent: number[]): AsyncGenerator<ZipEntry> {
+export async function* exportPhotos(me: number, list: Listed[], sent: number[]): AsyncGenerator<ZipEntry> {
   for (let i = 0; i < list.length; i += 10) {
     const batch = list.slice(i, i + 10);
-    const rows = await query<{ id: number; jpeg: Buffer }>("select id::int, jpeg from receipt_photo where id = any($1::bigint[])", [
-      batch.map((p) => p.id),
-    ]);
+    const rows = await query<{ id: number; jpeg: Buffer }>(
+      "select id::int, jpeg from receipt_photo where id = any($1::bigint[])",
+      [batch.map((p) => p.id)],
+      me,
+    );
     const byId = new Map(rows.map((r) => [r.id, r.jpeg]));
     for (const p of batch) {
       const jpeg = byId.get(p.id);
@@ -71,11 +73,12 @@ export async function* exportPhotos(list: Listed[], sent: number[]): AsyncGenera
 
 // After the whole zip has been sent: its photos carry the export's token. A later-started export
 // wins, so an older download finishing last does not take its photos away from the newer one.
-export const stampExport = (ids: number[], token: number) =>
+export const stampExport = (me: number, ids: number[], token: number) =>
   query(
     `update receipt_photo set exported_at = to_timestamp($2::float8 / 1000)
      where id = any($1::bigint[]) and (exported_at is null or exported_at < to_timestamp($2::float8 / 1000))`,
     [ids, token],
+    me,
   );
 
 // After the admin confirmed the zip saved: exactly the photos of that finished export are deleted,

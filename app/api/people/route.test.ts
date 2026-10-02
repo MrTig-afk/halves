@@ -33,8 +33,8 @@ describe("POST /api/people", () => {
   it("adds a tidied name as an unclaimed member, and says so when it is taken", async () => {
     query.mockResolvedValueOnce([{ id: 9 }]);
     expect(await (await post({ name: "  Rahul   Mehta " })).json()).toEqual({ id: 9, name: "Rahul Mehta" });
-    expect(query.mock.calls[0][0]).toMatch(/values \(\$1, 'member'\) on conflict do nothing/);
-    query.mockResolvedValueOnce([]);
+    expect(query.mock.calls[0]).toEqual(["select admin_add_person($1)::int as id", ["Rahul Mehta"], 1]); // the admin's id
+    query.mockResolvedValueOnce([{ id: null }]);
     expect((await post({ name: "Rahul Mehta" })).status).toBe(409);
     query.mockResolvedValueOnce([{ id: 10 }]);
     await post({ name: "Jose\u0301" }); // e + combining accent
@@ -49,12 +49,10 @@ describe("POST /api/people/<id>/reset", () => {
     expect(query).not.toHaveBeenCalled();
   });
 
-  it("resets a member and signs them out, in one statement that never touches an admin", async () => {
+  it("resets a member through the database function, as the admin (it refuses an admin tile and signs the member out)", async () => {
     query.mockResolvedValueOnce([{ reset: true }]);
     expect((await resetId("4")).status).toBe(200);
-    const sql = query.mock.calls[0][0] as string;
-    expect(sql).toMatch(/role = 'member'/);
-    expect(sql).toMatch(/delete from device_session/);
+    expect(query.mock.calls[0]).toEqual(["select admin_reset_pin($1) as reset", [4], 1]);
   });
 
   it("answers 404 for an admin, an unknown id or a bad id", async () => {

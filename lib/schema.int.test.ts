@@ -1,6 +1,8 @@
 // The shape of the database after the expand step, against the Neon dev branch (skipped without a
 // DATABASE_URL; refuses any database without the dev_branch_marker table and any role but halves_app):
 //   node --env-file=.env --env-file-if-exists=.env.local node_modules/vitest/vitest.mjs run lib/schema.int.test.ts
+// Row-level security (S1) means the app role sees a bill only as someone on it, so the checks that look
+// at "every bill" run as each person in turn (`everyone`) and add up what each of them can see.
 // Bills saved by the two-person code after the migration ran have no bill_person rows until the
 // migration runs again, so the shape checks look only at bills already in the new shape
 // (added_by set), and the legacy checks only at bills whose settlement the copy still agrees with.
@@ -11,18 +13,31 @@ describe.skipIf(!process.env.DATABASE_URL)("the database schema", async () => {
   const { query } = await import("./db");
   type P = { id: number; name: string };
   let A: P, B: P, admin: number;
+  let everyoneIds: number[] = [];
+  // The same read-only question asked as every person: the rows each can see, together.
+  const everyone = async <T,>(sql: string, params: unknown[] = []) => (await Promise.all(everyoneIds.map((id) => query<T>(sql, params, id)))).flat();
+  const total = (rows: Record<string, number>[]) =>
+    rows.reduce((t, r) => Object.fromEntries(Object.keys(r).map((k) => [k, (t[k] ?? 0) + Number(r[k])])), {} as Record<string, number>);
 
   const person = async (name: string): Promise<P> => {
-    await query("insert into person (name, role) values ($1, 'member') on conflict (name) do nothing", [name]);
+    const [a] = await query<{ id: number }>("select id::int as id from person where role = 'admin' limit 1");
+    await query("select admin_add_person($1)", [name], a.id); // the app role may not insert a tile itself; null when it exists
     return (await query<P>("select id::int as id, name from person where name = $1", [name]))[0];
   };
   const session = async (p: P) =>
     (await query<{ id: string }>("insert into device_session (person_id, pin_stamp) select id, pin_stamp from person where id = $1 returning id", [p.id]))[0].id;
-  const denied = async (sql: string, params: unknown[], message: RegExp) => {
-    const err = await query(sql, params).then(() => null, (e: Error) => e);
+  // The owner role, for what only a migration-time actor may do (simulating the pre-lock v2.3 code).
+  const asOwner = async (sql: string, params: unknown[]) => {
+    const { neon } = await import("@neondatabase/serverless");
+    const [m] = await query<{ dev: boolean }>("select to_regclass('public.dev_branch_marker') is not null as dev");
+    if (!m.dev || !process.env.MIGRATION_DATABASE_URL) throw new Error("Refusing: not the dev branch, or no owner URL.");
+    await neon(process.env.MIGRATION_DATABASE_URL).query(sql, params);
+  };
+  const denied = async (sql: string, params: unknown[], message: RegExp, as?: number) => {
+    const err = await query(sql, params, as).then(() => null, (e: Error) => e);
     expect(err?.message).toMatch(message);
   };
-  const FUNCTIONS = ["app_person", "is_member", "is_adder", "line_bill", "admin_add_person", "admin_reset_pin", "push_targets", "drop_push", "save_push"];
+  const FUNCTIONS = ["app_person", "is_member", "is_adder", "round_fits", "line_bill", "admin_add_person", "admin_reset_pin", "push_targets", "drop_push", "save_push"];
 
   beforeAll(async () => {
     const [marker] = await query<{ dev: boolean; role: string }>(
@@ -34,31 +49,32 @@ describe.skipIf(!process.env.DATABASE_URL)("the database schema", async () => {
     const [a] = await query<{ id: number }>("select id::int as id from person where role = 'admin' limit 1");
     if (!a) throw new Error("No admin tile on the dev branch.");
     admin = a.id;
+    everyoneIds = (await query<{ id: number }>("select id::int as id from person")).map((r) => r.id);
   }, 60_000);
 
   it("keeps every bill's payer on it, owing nothing and never settled", async () => {
-    const [r] = await query<{ missing: number; wrong: number }>(
+    const r = total(await everyone<{ missing: number; wrong: number }>(
       `select count(*) filter (where bp.bill_id is null)::int as missing,
               count(*) filter (where bp.bill_id is not null and (bp.owes_cents <> 0 or bp.settlement_id is not null))::int as wrong
        from bill b left join bill_person bp on bp.bill_id = b.id and bp.person_id = b.payer_id
        where b.added_by is not null`,
-    );
+    ));
     expect(r).toEqual({ missing: 0, wrong: 0 });
   });
 
   it("keeps every bill at 2 to 5 people, its adder among them", async () => {
-    const [r] = await query<{ bad: number; no_adder: number }>(
+    const r = total(await everyone<{ bad: number; no_adder: number }>(
       `select count(*) filter (where n < 2 or n > 5)::int as bad,
               count(*) filter (where not adder_in)::int as no_adder
        from (select b.id, (select count(*) from bill_person bp where bp.bill_id = b.id) as n,
                     exists (select 1 from bill_person bp where bp.bill_id = b.id and bp.person_id = b.added_by) as adder_in
              from bill b where b.added_by is not null) x`,
-    );
+    ));
     expect(r).toEqual({ bad: 0, no_adder: 0 });
   });
 
   it("gives every item someone who had it, on its bill, and discounts and surcharges nobody", async () => {
-    const [r] = await query<{ items_without: number; foreign_person: number; others_with: number }>(
+    const r = total(await everyone<{ items_without: number; foreign_person: number; others_with: number }>(
       `select count(*) filter (where li.kind = 'item' and lp.n = 0)::int as items_without,
               count(*) filter (where lp.foreign_n > 0)::int as foreign_person,
               count(*) filter (where li.kind <> 'item' and lp.n > 0)::int as others_with
@@ -68,7 +84,7 @@ describe.skipIf(!process.env.DATABASE_URL)("the database schema", async () => {
                 count(*) filter (where not exists (select 1 from bill_person bp where bp.bill_id = li.bill_id and bp.person_id = lip.person_id)) as foreign_n
          from line_item_person lip where lip.line_item_id = li.id) lp
        where b.added_by is not null`,
-    );
+    ));
     expect(r).toEqual({ items_without: 0, foreign_person: 0, others_with: 0 });
   });
 
@@ -77,9 +93,8 @@ describe.skipIf(!process.env.DATABASE_URL)("the database schema", async () => {
     and (select settlement_id from bill_person x where x.bill_id = b.id and x.person_id = b.partner_id) is not distinct from b.settlement_id`;
 
   it("carries a legacy bill's partner amount and shares over", async () => {
-    const [n] = await query<{ n: number }>(`select count(*)::int as n from bill b where ${legacy}`);
-    expect(n.n).toBeGreaterThan(0);
-    const all = await query<{ amount: number; shares: number }>(
+    expect(total(await everyone<{ n: number }>(`select count(*)::int as n from bill b where ${legacy}`)).n).toBeGreaterThan(0);
+    const all = await everyone<{ amount: number; shares: number }>(
       `select count(*) filter (where bp.owes_cents is distinct from b.partner_owes_cents)::int as amount,
               (select count(*) from line_item li join line_item_person z on z.line_item_id = li.id
                where li.bill_id = b.id and li.kind = 'item' and (
@@ -89,9 +104,11 @@ describe.skipIf(!process.env.DATABASE_URL)("the database schema", async () => {
        group by b.id`,
     );
     expect(all.filter((x) => x.amount || x.shares)).toEqual([]);
-    const [split] = await query<{ bad: number }>(
-      `select count(*) filter (where (select count(*) from line_item_person z where z.line_item_id = li.id) <> 2)::int as bad
-       from line_item li join bill b on b.id = li.bill_id where li.kind = 'item' and li.share = 'split' and ${legacy}`,
+    const split = total(
+      await everyone<{ bad: number }>(
+        `select count(*) filter (where (select count(*) from line_item_person z where z.line_item_id = li.id) <> 2)::int as bad
+         from line_item li join bill b on b.id = li.bill_id where li.kind = 'item' and li.share = 'split' and ${legacy}`,
+      ),
     );
     expect(split.bad).toBe(0);
   });
@@ -101,12 +118,13 @@ describe.skipIf(!process.env.DATABASE_URL)("the database schema", async () => {
   it("carries a settle the old code made after the copy over on the next migration", async () => {
     const migrate = () => expect(execFileSync(process.execPath, ["scripts/migrate.mjs"], { encoding: "utf8" })).toMatch(/target: dev/);
     const [b] = await query<{ id: number }>(
-      `insert into bill (payer_id, partner_id, description, bill_date, total_cents, partner_owes_cents)
-       values ($1, $2, 'Test Schema carry-over', current_date, 1000, 500) returning id::int as id`,
+      `insert into bill (payer_id, partner_id, added_by, description, bill_date, total_cents, partner_owes_cents)
+       values ($1, $2, $1, 'Test Schema carry-over', current_date, 1000, 500) returning id::int as id`,
       [A.id, B.id],
+      A.id,
     );
     const share = async () =>
-      (await query<{ s: number | null }>("select settlement_id::int as s from bill_person where bill_id = $1 and person_id = $2", [b.id, B.id]))[0]?.s;
+      (await query<{ s: number | null }>("select settlement_id::int as s from bill_person where bill_id = $1 and person_id = $2", [b.id, B.id], A.id))[0]?.s;
     migrate();
     expect(await share()).toBeNull();
     const [lo, hi] = [A.id, B.id].sort((x, y) => x - y);
@@ -114,15 +132,40 @@ describe.skipIf(!process.env.DATABASE_URL)("the database schema", async () => {
       `insert into settlement (person_low_id, person_high_id, amount_cents, from_person_id, to_person_id, settled_by)
        values ($1, $2, 500, $3, $4, $4) returning id::int as id`,
       [lo, hi, B.id, A.id],
+      A.id,
     );
-    await query("update bill set settlement_id = $1 where id = $2", [s.id, b.id]);
+    // What the v2.3 code did (it settles through bill.settlement_id, which the narrow grants no longer
+    // allow the app role): done as the owner role, the one that runs migrations.
+    await asOwner("update bill set settlement_id = $1 where id = $2", [s.id, b.id]);
     migrate();
     expect(await share()).toBe(s.id);
+    expect((await query<{ at: string | null }>("select settled_at::text as at from bill_person where bill_id = $1 and person_id = $2", [b.id, B.id], A.id))[0].at).not.toBeNull();
+  }, 120_000);
+
+  // TEMPORARY (deleted with the old columns): a legacy $0.00 share gets its settle time with no round
+  // (the trigger lets it); a legacy share that owes something does not.
+  it("backfills a legacy $0.00 share's settle time without a round, and an open share's never", async () => {
+    const legacyBill = async (owes: number) =>
+      (await query<{ id: number }>(
+        `insert into bill (payer_id, partner_id, added_by, description, bill_date, total_cents, partner_owes_cents)
+         values ($1, $2, $1, 'Test Schema zero share', current_date, 1000, $3) returning id::int as id`,
+        [A.id, B.id, owes],
+        A.id,
+      ))[0].id;
+    const [zero, owing] = [await legacyBill(0), await legacyBill(500)];
+    const out = () => execFileSync(process.execPath, ["scripts/migrate.mjs"], { encoding: "utf8" });
+    expect(out()).toMatch(/schema applied/);
+    expect(out()).toMatch(/schema applied/); // a second run changes nothing and does not fail
+    const at = async (b: number) =>
+      (await query<{ at: string | null; s: number | null }>("select settled_at::text as at, settlement_id::int as s from bill_person where bill_id = $1 and person_id = $2", [b, B.id], A.id))[0];
+    expect((await at(zero)).at).not.toBeNull();
+    expect((await at(zero)).s).toBeNull();
+    expect(await at(owing)).toEqual({ at: null, s: null });
   }, 120_000);
 
   // TEMPORARY (deleted with the old columns): the balance, either way round, is unchanged.
   it("gives every pair the same open balance from bill_person as from the old columns", async () => {
-    const [{ diff }] = await query<{ diff: number }>(
+    const { diff } = total(await everyone<{ diff: number }>(
       `with old as (
          select b.payer_id as x, b.partner_id as y, sum(b.partner_owes_cents) as c from bill b
          where ${legacy} and b.settlement_id is null group by 1, 2),
@@ -132,19 +175,22 @@ describe.skipIf(!process.env.DATABASE_URL)("the database schema", async () => {
          where ${legacy} and bp.settlement_id is null and bp.owes_cents > 0 group by 1, 2)
        select count(*)::int as diff from old full join new on old.x = new.x and old.y = new.y
        where coalesce(old.c, 0) <> coalesce(new.c, 0)`,
-    );
+    ));
     expect(diff).toBe(0);
   });
 
   it("refuses the app role what a share may never do", async () => {
-    const [s] = await query<{ bill_id: number; person_id: number }>(
-      "select bill_id::int, person_id::int from bill_person where settlement_id is not null limit 1",
+    // A settled share, seen by the person whose share it is (the one who could try to undo it).
+    const [s] = await everyone<{ bill_id: number; person_id: number }>(
+      "select bill_id::int, person_id::int from bill_person where settlement_id is not null and person_id = app_person() limit 1",
     );
     expect(s, "dev needs a settled share").toBeDefined();
-    await denied("update bill_person set owes_cents = owes_cents + 1 where bill_id = $1 and person_id = $2", [s.bill_id, s.person_id], /permission denied/);
-    await denied("update bill_person set settlement_id = null where bill_id = $1 and person_id = $2", [s.bill_id, s.person_id], /already settled/);
-    await denied("delete from bill_person where bill_id = $1 and person_id = $2", [s.bill_id, s.person_id], /permission denied/);
-    await denied("delete from line_item_person where person_id = $1", [s.person_id], /permission denied/);
+    const as = s.person_id;
+    await denied("update bill_person set owes_cents = owes_cents + 1 where bill_id = $1 and person_id = $2", [s.bill_id, s.person_id], /permission denied/, as);
+    await denied("update bill_person set settlement_id = null where bill_id = $1 and person_id = $2", [s.bill_id, s.person_id], /already settled/, as);
+    await denied("update bill_person set settled_at = now() where bill_id = $1 and person_id = $2 and settled_at is not null", [s.bill_id, s.person_id], /already settled/, as);
+    await denied("delete from bill_person where bill_id = $1 and person_id = $2", [s.bill_id, s.person_id], /permission denied/, as);
+    await denied("delete from line_item_person where person_id = $1", [s.person_id], /permission denied/, as);
   });
 
   it("tells the database who the app is acting for, and keeps the error codes", async () => {
@@ -207,16 +253,14 @@ describe.skipIf(!process.env.DATABASE_URL)("the database schema", async () => {
   it("lists a phone that still signs someone in, and forgets a dead one", async () => {
     const s = await session(B);
     const endpoint = `https://push.invalid/${crypto.randomUUID()}`;
-    const [{ id }] = await query<{ id: number }>(
-      "insert into push_subscription (person_id, session_id, endpoint, p256dh, auth) values ($1, $2, $3, 'k', 'a') returning id::int as id",
-      [B.id, s, endpoint],
-    );
+    await query("select save_push($1::uuid, $2, 'k', 'a')", [s, endpoint], B.id); // the app role writes subscriptions only through the function
+    const [{ id }] = await query<{ id: number }>("select id::int as id from push_subscription where endpoint = $1", [endpoint], B.id);
     const listed = async () => (await query<{ id: number }>("select id::int as id from push_targets($1)", [B.id])).map((r) => r.id);
     expect(await listed()).toContain(id);
     await query("update person set pin_stamp = gen_random_uuid() where id = $1", [B.id]);
     expect(await listed()).not.toContain(id);
     await query("select drop_push($1)", [id]);
-    expect(await query("select 1 from push_subscription where id = $1", [id])).toHaveLength(0);
+    expect(await query("select 1 from push_subscription where id = $1", [id], B.id)).toHaveLength(0);
   });
 
   it("saves a phone's subscription for its own session only, taking over a held endpoint", async () => {
@@ -224,7 +268,9 @@ describe.skipIf(!process.env.DATABASE_URL)("the database schema", async () => {
     const endpoint = `https://push.invalid/${crypto.randomUUID()}`;
     const save = async (as: number, sess: string) =>
       (await query<{ ok: boolean }>("select save_push($1, $2, 'k', 'a') as ok", [sess, endpoint], as))[0].ok;
-    const owner = async () => (await query<{ p: number; s: string }>("select person_id::int as p, session_id::text as s from push_subscription where endpoint = $1", [endpoint]))[0];
+    // Whose row it is, asked as every person: only the holder's own view returns it.
+    const owner = async () =>
+      (await everyone<{ p: number; s: string }>("select person_id::int as p, session_id::text as s from push_subscription where endpoint = $1", [endpoint]))[0];
     expect(await save(A.id, sa)).toBe(true);
     expect(await owner()).toEqual({ p: A.id, s: sa });
     expect(await save(B.id, sb)).toBe(true);
@@ -242,8 +288,7 @@ describe.skipIf(!process.env.DATABASE_URL)("the database schema", async () => {
       { column_name: "date_edited_at", data_type: "timestamp with time zone", is_nullable: "YES", column_default: null },
       { column_name: "total_edited_at", data_type: "timestamp with time zone", is_nullable: "YES", column_default: null },
     ]);
-    const [r] = await query<{ n: number }>("select count(*)::int as n from bill where typed and (date_edited_at is not null or total_edited_at is not null)");
-    expect(r.n).toBe(0);
+    expect(total(await everyone<{ n: number }>("select count(*)::int as n from bill where typed and (date_edited_at is not null or total_edited_at is not null)")).n).toBe(0);
   });
 
   it("keeps the PIN throttle writable but never deletable by the app role, and without row security", async () => {
