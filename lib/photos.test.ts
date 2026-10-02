@@ -18,9 +18,10 @@ describe("exportPhotos", () => {
   it("hands over the listed photos still here, named and noted as sent", async () => {
     const sent: number[] = [];
     const names: string[] = [];
-    for await (const e of exportPhotos(list, sent)) names.push(e.name);
+    for await (const e of exportPhotos(7, list, sent)) names.push(e.name);
     expect(names).toEqual(["2026-09-29_1_Coles.jpg", "2026-09-29_3_Coles.jpg"]);
     expect(sent).toEqual([1, 3]);
     expect(query).toHaveBeenCalledTimes(1); // ten per round trip
+    expect(query.mock.calls[0][2]).toBe(7); // as the admin, so row-level security applies
   });
 });

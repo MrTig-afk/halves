@@ -1,12 +1,29 @@
 "use client";
 
-// Settle all, with its confirm sheet. The sheet sends the amount it showed; the server settles
-// only if that is still the balance, otherwise it answers with the new one to confirm again.
+// Settle all / Settle up with one person, with its confirm sheet (the caller gives the texts and
+// where to go afterwards). The sheet sends the amount it showed; the server settles only if that is
+// still the balance, otherwise it answers with the new one to confirm again.
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { formatCents } from "@/lib/money";
 
-export function SettleButton({ partnerId, partner, balance: shown, open }: { partnerId: number; partner: string; balance: number; open: number }) {
+export function SettleButton({
+  partnerId,
+  partner,
+  balance: shown,
+  label,
+  note,
+  confirm,
+  after,
+}: {
+  partnerId: number;
+  partner: string;
+  balance: number;
+  label: string; // the button on the page
+  note: string; // under the amount in the sheet
+  confirm: string; // the sheet's button
+  after?: string; // where to go once settled; stays put when absent
+}) {
   const router = useRouter();
   const [sheet, setSheet] = useState(false);
   // What the sheet asks the person to confirm; a changed tab replaces it with the server's figure.
@@ -35,15 +52,23 @@ export function SettleButton({ partnerId, partner, balance: shown, open }: { par
       if (res.status === 409) {
         // A bill arrived since the sheet opened: show the new amount and ask again.
         const body = await res.json();
+        if (body.balance === 0) {
+          // The other person settled first: the same end as settling here.
+          setSheet(false);
+          if (after) router.replace(after);
+          else router.refresh();
+          return;
+        }
         router.refresh();
-        if (body.balance === 0) return setSheet(false); // the other person settled first
         setBalance(body.balance);
         setChanged(true);
         return;
       }
       if (!res.ok) throw new Error(String(res.status));
       setSheet(false);
-      router.refresh();
+      // replace, not push: Back must not return to the tab as it was before settling.
+      if (after) router.replace(after);
+      else router.refresh();
     } catch {
       setError("Couldn't settle. Check your connection and try again.");
     } finally {
@@ -62,7 +87,7 @@ export function SettleButton({ partnerId, partner, balance: shown, open }: { par
           setSheet(true);
         }}
       >
-        Settle all
+        {label}
       </button>
       {sheet && (
         <dialog
@@ -83,9 +108,7 @@ export function SettleButton({ partnerId, partner, balance: shown, open }: { par
                 The tab changed since this opened, so the amount is different now. Check it and settle again.
               </div>
             ) : (
-              <span className="small dim">
-                Clears {open} open {open === 1 ? "bill" : "bills"}. The balance goes to $0.00 for both of you. This can&apos;t be undone.
-              </span>
+              <span className="small dim">{note}</span>
             )}
             {error && (
               <div className="banner amber" role="alert">
@@ -93,7 +116,7 @@ export function SettleButton({ partnerId, partner, balance: shown, open }: { par
               </div>
             )}
             <button type="button" className="btn" disabled={busy} onClick={settle}>
-              {busy ? "Settling…" : "Settle all"}
+              {busy ? "Settling…" : confirm}
             </button>
             <button type="button" className="btn ghost sm" disabled={busy} onClick={() => setSheet(false)}>
               Cancel

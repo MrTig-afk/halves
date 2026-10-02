@@ -2,7 +2,7 @@
 // network error): the server already retries Gemini itself, so retrying anything else would
 // multiply free-tier calls. Every other failure is shown, and `retryable` tells the UI to
 // offer Try again.
-import type { NewBill, Saved } from "./bill";
+import type { BillBody, Saved } from "./bill";
 import type { ReceiptReading } from "./receipt";
 import type { VoiceReply } from "./voice";
 
@@ -58,18 +58,19 @@ export async function postReceipt(jpeg: Blob, attempts = 2): Promise<ReadResult>
   return r.ok ? { ok: true, reading: r.body as ReceiptReading } : r;
 }
 
-export async function postVoice(audio: Blob, items: string[]): Promise<VoiceResult> {
+export async function postVoice(audio: Blob, items: string[], people: number[]): Promise<VoiceResult> {
   const r = await send("/api/voice", () => {
     const form = new FormData();
     form.append("file", audio, "voice");
     form.append("items", JSON.stringify(items));
+    form.append("people", JSON.stringify(people));
     return form;
   });
   return r.ok ? { ok: true, ...(r.body as VoiceReply) } : r;
 }
 
 // Sending the same bill twice is safe: the scan id makes the server save it once.
-export async function postBill(bill: NewBill, photo: Blob | null): Promise<SaveResult> {
+export async function postBill(bill: BillBody, photo: Blob | null): Promise<SaveResult> {
   const r = await send("/api/bill", () => {
     const form = new FormData();
     form.append("bill", JSON.stringify(bill));
@@ -77,4 +78,18 @@ export async function postBill(bill: NewBill, photo: Blob | null): Promise<SaveR
     return form;
   });
   return r.ok ? { ok: true, ...(r.body as Saved) } : r;
+}
+
+export const today = () => new Date().toLocaleDateString("en-CA"); // YYYY-MM-DD in local time
+// crypto.randomUUID only exists on https and localhost; a phone testing over the LAN is neither.
+export const uuid = () =>
+  crypto.randomUUID?.() ??
+  "10000000-1000-4000-8000-100000000000".replace(/[018]/g, (c) => (Number(c) ^ (crypto.getRandomValues(new Uint8Array(1))[0] & (15 >> (Number(c) / 4)))).toString(16));
+
+// What a refused or failed save shows, for Review and the no-receipt form alike: the approved Retry
+// message when it is worth sending again, else the server's own. The server's general "Check the
+// lines" has nothing to point at on a screen with no lines.
+export function saveFailure(r: ApiFailure, lines = true): { text: string; retry: boolean } {
+  if (r.retryable) return { text: "Couldn't save. Check your connection and try again. Nothing you entered is lost.", retry: true };
+  return { text: !lines && r.error === "bad_bill" && r.message.includes("Check the lines") ? "Something went wrong. Try again." : r.message, retry: false };
 }

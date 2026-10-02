@@ -24,6 +24,7 @@ export async function GET(req: Request) {
   const [r] = await query<{ yes: boolean }>(
     "select exists (select 1 from push_subscription where endpoint = $1 and session_id = $2) as yes",
     [endpoint, w.session],
+    w.me.id,
   );
   return Response.json({ on: r.yes });
 }
@@ -35,13 +36,9 @@ export async function POST(req: Request) {
   const endpoint = pushEndpoint(body?.endpoint);
   const { p256dh, auth } = body?.keys ?? {};
   if (!endpoint || !key(p256dh) || !key(auth)) return fail(400, "bad_request", "This browser's notification details weren't accepted.");
-  await query(
-    `with old as (delete from push_subscription where session_id = $2 and endpoint <> $3)
-     insert into push_subscription (person_id, session_id, endpoint, p256dh, auth) values ($1, $2, $3, $4, $5)
-     on conflict (endpoint) do update
-       set person_id = excluded.person_id, session_id = excluded.session_id, p256dh = excluded.p256dh, auth = excluded.auth`,
-    [w.me.id, w.session, endpoint, p256dh, auth],
-  );
+  // save_push (a database function) also takes over an endpoint another person's stale session holds.
+  const [r] = await query<{ ok: boolean }>("select save_push($1::uuid, $2, $3, $4) as ok", [w.session, endpoint, p256dh, auth], w.me.id);
+  if (!r.ok) return fail(401, "signed_out", "Sign in again."); // this session no longer signs me in
   return Response.json({ on: true });
 }
 
@@ -49,6 +46,6 @@ export async function DELETE(req: Request) {
   const w = await who();
   if (!w) return fail(401, "signed_out", "Sign in again.");
   const endpoint = pushEndpoint((await req.json().catch(() => null))?.endpoint);
-  if (endpoint) await query("delete from push_subscription where endpoint = $1 and person_id = $2", [endpoint, w.me.id]);
+  if (endpoint) await query("delete from push_subscription where endpoint = $1 and person_id = $2", [endpoint, w.me.id], w.me.id);
   return Response.json({ on: false });
 }

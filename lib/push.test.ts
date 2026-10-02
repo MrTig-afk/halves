@@ -50,7 +50,7 @@ describe("notify", () => {
       .mockRejectedValueOnce(Object.assign(new Error("busy"), { statusCode: 503 }))
       .mockRejectedValueOnce(Object.assign(new Error("key mismatch"), { statusCode: 403 }));
     await notify(4, { title: "Kaushik added a bill", url: "/bill/5" });
-    expect(query.mock.calls[0][1]).toEqual([4]);
+    expect(query.mock.calls[0]).toEqual(["select id::int, endpoint, p256dh, auth from push_targets($1)", [4]]); // no personId: the function reads another person's phones
     expect(sendNotification).toHaveBeenCalledTimes(4);
     const [target, payload, options] = sendNotification.mock.calls[0];
     expect(target).toEqual({ endpoint: sub(1).endpoint, keys: { p256dh: "p", auth: "a" } });
@@ -58,8 +58,8 @@ describe("notify", () => {
     expect(options.vapidDetails).toEqual({ subject: "mailto:admin@example.com", publicKey: "public", privateKey: "private" });
     // gone (410) and refused for our key (403) are removed; a busy push service is not a dead subscription
     expect(query.mock.calls.slice(1)).toEqual([
-      ["delete from push_subscription where id = $1", [2]],
-      ["delete from push_subscription where id = $1", [4]],
+      ["select drop_push($1)", [2]],
+      ["select drop_push($1)", [4]],
     ]);
   });
 
@@ -76,6 +76,7 @@ describe("hasPush", () => {
   it("is true only when push is set up and the person has a phone for it, and never throws", async () => {
     query.mockResolvedValueOnce([{ yes: true }]);
     expect(await hasPush(4)).toBe(true);
+    expect(query.mock.calls[0]).toEqual(["select exists (select 1 from push_targets($1)) as yes", [4]]);
     query.mockRejectedValueOnce(new Error("connection reset"));
     expect(await hasPush(4)).toBe(false); // the bill is already saved; the flag must not fail it
     vi.stubEnv("ADMIN_EMAIL", "");

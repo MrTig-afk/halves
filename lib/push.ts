@@ -22,9 +22,8 @@ export function pushEndpoint(v: unknown): string | null {
   return ok ? url.href : null;
 }
 
-// Only phones whose session still signs someone in (the pin_stamp rule in lib/session.ts).
-const LIVE = "join device_session s on s.id = ps.session_id join person p on p.id = s.person_id and p.pin_stamp = s.pin_stamp";
-
+// Another person's phones are read and forgotten through push_targets / drop_push (database
+// functions, no row-level access to their rows): only phones whose session still signs someone in.
 const configured = () => !!(process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY && process.env.ADMIN_EMAIL);
 
 // Refused for good: gone (404/410), or not usable with our key (400/403, e.g. after a key change).
@@ -34,7 +33,7 @@ export async function notify(personId: number, note: Note): Promise<void> {
   if (!configured()) return console.error(JSON.stringify({ event: "push_unconfigured" }));
   const { VAPID_PUBLIC_KEY: publicKey, VAPID_PRIVATE_KEY: privateKey, ADMIN_EMAIL: email } = process.env as Record<string, string>;
   const subs = await query<{ id: number; endpoint: string; p256dh: string; auth: string }>(
-    `select ps.id::int, ps.endpoint, ps.p256dh, ps.auth from push_subscription ps ${LIVE} where ps.person_id = $1`,
+    "select id::int, endpoint, p256dh, auth from push_targets($1)",
     [personId],
   );
   await Promise.all(
@@ -47,7 +46,7 @@ export async function notify(personId: number, note: Note): Promise<void> {
         });
       } catch (e) {
         const status = (e as { statusCode?: number }).statusCode;
-        if (status && DEAD.has(status)) await query("delete from push_subscription where id = $1", [s.id]);
+        if (status && DEAD.has(status)) await query("select drop_push($1)", [s.id]);
         else console.error(JSON.stringify({ event: "push_failed", status: status ?? null }));
       }
     }),
@@ -64,7 +63,7 @@ export const notifyLater = (personId: number, note: Note) =>
 export async function hasPush(personId: number): Promise<boolean> {
   if (!configured()) return false;
   try {
-    const [r] = await query<{ yes: boolean }>(`select exists (select 1 from push_subscription ps ${LIVE} where ps.person_id = $1) as yes`, [personId]);
+    const [r] = await query<{ yes: boolean }>("select exists (select 1 from push_targets($1)) as yes", [personId]);
     return r.yes;
   } catch {
     return false;

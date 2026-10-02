@@ -4,14 +4,15 @@
 import { neon } from "@neondatabase/serverless";
 import { hashPin, isValidPin } from "../lib/pin.ts";
 
-const { DATABASE_URL, ADMIN_NAME, ADMIN_EMAIL, ADMIN_INITIAL_PIN, PARTNER_NAME } = process.env;
-const missing = Object.entries({ DATABASE_URL, ADMIN_NAME, ADMIN_INITIAL_PIN, PARTNER_NAME })
+// Setup is the owner role's job: the app role may no longer write role, email, pin_hash or claimed_at.
+const { MIGRATION_DATABASE_URL, ADMIN_NAME, ADMIN_EMAIL, ADMIN_INITIAL_PIN, PARTNER_NAME } = process.env;
+const missing = Object.entries({ MIGRATION_DATABASE_URL, ADMIN_NAME, ADMIN_INITIAL_PIN, PARTNER_NAME })
   .filter(([, v]) => !v)
   .map(([k]) => k);
 if (missing.length) throw new Error(`missing: ${missing.join(", ")}`);
 if (!isValidPin(ADMIN_INITIAL_PIN)) throw new Error("ADMIN_INITIAL_PIN must be exactly 4 digits");
 
-const sql = neon(DATABASE_URL!);
+const sql = neon(MIGRATION_DATABASE_URL!);
 const admin = await sql.query(
   `insert into person (name, role, email, pin_hash, claimed_at)
    select $1, 'admin', $2, $3, now() where not exists (select 1 from person where role = 'admin')

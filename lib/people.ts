@@ -20,26 +20,28 @@ export function tileName(raw: unknown): string {
 
 // A new, unclaimed tile: whoever taps it first sets its PIN. null when the name is taken, in any
 // letter case (a unique index on lower(name)), so "rahul" never sits beside "Rahul".
-export async function addPerson(name: string): Promise<number | null> {
-  const [r] = await query<{ id: number }>(
-    "insert into person (name, role) values ($1, 'member') on conflict do nothing returning id::int",
-    [name],
-  );
+export async function addPerson(me: number, name: string): Promise<number | null> {
+  const [r] = await query<{ id: number | null }>("select admin_add_person($1)::int as id", [name], me);
   return r?.id ?? null;
 }
 
 // Back to an unclaimed tile, signed out on every phone - and so with no phone left receiving its
 // notifications (a subscription goes with its session) - in one statement. An admin tile is never reset this way (the admin changes their
 // own PIN), or the admin tile could be claimed by whoever tapped it first.
-export async function resetPin(id: number): Promise<boolean> {
-  const [r] = await query<{ reset: boolean }>(
-    `with p as (
-       update person set pin_hash = null, pin_stamp = gen_random_uuid(), failed_pin_count = 0, locked_until = null, claimed_at = null
-       where id = $1 and role = 'member' returning id
-     ),
-     s as (delete from device_session where person_id in (select id from p) returning 1)
-     select exists (select 1 from p) as reset`,
-    [id],
-  );
+export async function resetPin(me: number, id: number): Promise<boolean> {
+  const [r] = await query<{ reset: boolean }>("select admin_reset_pin($1) as reset", [id], me);
   return r.reset;
+}
+
+// Who a new bill starts with: the people of the signed-in person's last added bill, or on a first
+// bill themselves and the first other person added. `all` is everyone, you first then by id (the
+// order the pickers show); `start` is the ids to tick. Names only: nothing else of a person leaves.
+export async function billPeople(me: number): Promise<{ all: { id: number; name: string }[]; start: number[] }> {
+  const [every, last] = await Promise.all([
+    people(),
+    query<{ id: number }>("select person_id::int as id from bill_person where bill_id = (select id from bill where added_by = $1 order by id desc limit 1)", [me], me),
+  ]);
+  const all = every.map((p) => ({ id: p.id, name: p.name })).sort((a, b) => Number(b.id === me) - Number(a.id === me) || a.id - b.id);
+  const on = all.filter((p) => last.some((l) => l.id === p.id));
+  return { all, start: (on.length ? on : all.slice(0, 2)).map((p) => p.id) };
 }

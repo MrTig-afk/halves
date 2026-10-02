@@ -11,9 +11,10 @@ type Step =
   | { k: "tiles" }
   | { k: "pin"; tile: Tile; message?: string; shake?: boolean; n?: number }
   | { k: "set"; tile: Tile; first?: string; message?: string; n?: number }
-  | { k: "locked"; tile: Tile; until: number };
+  | { k: "locked"; tile: Tile; until: number }
+  | { k: "paused"; until: number }; // E2b: this phone used its wrong PINs
 
-type Answer = { ok?: boolean; error?: string; triesLeft?: number; lockedUntil?: string };
+type Answer = { ok?: boolean; error?: string; triesLeft?: number; lockedUntil?: string; until?: string };
 
 async function send(path: string, personId: number, pin: string): Promise<Answer> {
   try {
@@ -47,6 +48,7 @@ export function SignIn({ tiles, next }: { tiles: Tile[]; next: string }) {
     setBusy(false);
     if (a.ok) return signedIn();
     if (a.error === "locked" && a.lockedUntil) return setStep({ k: "locked", tile: step.tile, until: Date.parse(a.lockedUntil) });
+    if (a.error === "slow_down" && a.until) return setStep({ k: "paused", until: Date.parse(a.until) });
     if (a.error === "wrong_pin") {
       const n = a.triesLeft ?? 0;
       return setStep({ k: "pin", tile: step.tile, message: `Wrong PIN. ${n} ${n === 1 ? "try" : "tries"} left.`, shake: true, n: Date.now() });
@@ -63,7 +65,26 @@ export function SignIn({ tiles, next }: { tiles: Tile[]; next: string }) {
     setStep(step.k === "set" ? { k: "set", tile: step.tile, message, n: Date.now() } : { k: "pin", tile: step.tile, message, n: Date.now() });
   };
 
-  if (step.k === "locked") return <Locked tile={step.tile} until={step.until} back={() => setStep({ k: "tiles" })} />;
+  if (step.k === "locked") {
+    return (
+      <Locked
+        title={`${step.tile.name}'s tile is locked`}
+        line={() => "Too many wrong PINs. Try again when the timer ends, or ask the admin to reset your PIN."}
+        until={step.until}
+        back={() => setStep({ k: "tiles" })}
+      />
+    );
+  }
+  if (step.k === "paused") {
+    return (
+      <Locked
+        title="Too many wrong PINs from this phone"
+        line={(m) => `Try again in ${m}. Other phones are not affected.`}
+        until={step.until}
+        back={() => setStep({ k: "tiles" })}
+      />
+    );
+  }
 
   if (step.k === "pin" || step.k === "set") {
     const title = step.k === "pin" ? "Enter your PIN" : step.first ? "Enter it again" : `Hi ${step.tile.name}, choose a PIN`;
@@ -150,13 +171,14 @@ export function PinPad({ busy, shake, message, onDone }: { busy: boolean; shake:
   );
 }
 
-function Locked({ tile, until, back }: { tile: Tile; until: number; back: () => void }) {
+function Locked({ title, line, until, back }: { title: string; line: (m: string) => string; until: number; back: () => void }) {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(t);
   }, []);
   const left = Math.max(0, Math.ceil((until - now) / 1000));
+  const m = `${Math.floor(left / 60)}:${String(left % 60).padStart(2, "0")}`;
   return (
     <main className="screen">
       <div className="center">
@@ -166,11 +188,11 @@ function Locked({ tile, until, back }: { tile: Tile; until: number; back: () => 
             <path d="M7 11V7a5 5 0 0 1 10 0v4" />
           </svg>
         </div>
-        <b>{tile.name}&apos;s tile is locked</b>
+        <b>{title}</b>
         <div className="num" style={{ fontSize: 26, fontWeight: 800 }}>
-          {Math.floor(left / 60)}:{String(left % 60).padStart(2, "0")}
+          {m}
         </div>
-        <span className="dim small">Too many wrong PINs. Try again when the timer ends, or ask the admin to reset your PIN.</span>
+        <span className="dim small">{line(m)}</span>
       </div>
       <div className="foot">
         <button type="button" className="btn ghost sm" onClick={back}>

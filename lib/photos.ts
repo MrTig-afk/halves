@@ -1,6 +1,6 @@
 // The admin's monthly photo export: what is kept, a zip of it, and deleting exactly what was zipped
 // once the admin confirms it saved. Only photos of bills the admin is on: a bill's photo is visible
-// to its two people only (bills between two other people keep theirs).
+// to the people on its bill only (a bill the admin is not on keeps its photo).
 //
 // An export is named by a token from the admin's phone (the time Download was pressed). Only once
 // the whole zip, directory included, has been read from the stream are its photos stamped with that
@@ -16,7 +16,7 @@ export const PHOTO_CAP_BYTES = 400 * 1024 * 1024;
 
 export type PhotoSummary = { count: number; bytes: number; upto: number | null; db_bytes: number };
 
-const MINE = "join bill b on b.id = p.bill_id where (b.payer_id = $1 or b.partner_id = $1)";
+const MINE = "join bill b on b.id = p.bill_id where exists (select 1 from bill_person m where m.bill_id = b.id and m.person_id = $1)";
 
 export async function photoSummary(me: number): Promise<PhotoSummary> {
   const [s] = await query<PhotoSummary>(
@@ -24,6 +24,7 @@ export async function photoSummary(me: number): Promise<PhotoSummary> {
             pg_database_size(current_database())::float8 as db_bytes
      from receipt_photo p ${MINE}`,
     [me],
+    me,
   );
   return s;
 }
@@ -38,6 +39,7 @@ export const listPhotos = (me: number, upto: number) =>
             to_char(p.created_at at time zone 'Australia/Sydney', 'YYYY-MM-DD"T"HH24:MI:SS') as taken
      from receipt_photo p ${MINE} and p.id <= $2 order by p.id`,
     [me, upto],
+    me,
   );
 
 const slug = (s: string) =>
@@ -50,12 +52,14 @@ const slug = (s: string) =>
 
 // The listed photos, ten per database round trip, named <date>_<bill id>_<description>.jpg and
 // dated on the roommates' clock. Each one handed over is added to `sent`.
-export async function* exportPhotos(list: Listed[], sent: number[]): AsyncGenerator<ZipEntry> {
+export async function* exportPhotos(me: number, list: Listed[], sent: number[]): AsyncGenerator<ZipEntry> {
   for (let i = 0; i < list.length; i += 10) {
     const batch = list.slice(i, i + 10);
-    const rows = await query<{ id: number; jpeg: Buffer }>("select id::int, jpeg from receipt_photo where id = any($1::bigint[])", [
-      batch.map((p) => p.id),
-    ]);
+    const rows = await query<{ id: number; jpeg: Buffer }>(
+      "select id::int, jpeg from receipt_photo where id = any($1::bigint[])",
+      [batch.map((p) => p.id)],
+      me,
+    );
     const byId = new Map(rows.map((r) => [r.id, r.jpeg]));
     for (const p of batch) {
       const jpeg = byId.get(p.id);
@@ -69,11 +73,12 @@ export async function* exportPhotos(list: Listed[], sent: number[]): AsyncGenera
 
 // After the whole zip has been sent: its photos carry the export's token. A later-started export
 // wins, so an older download finishing last does not take its photos away from the newer one.
-export const stampExport = (ids: number[], token: number) =>
+export const stampExport = (me: number, ids: number[], token: number) =>
   query(
     `update receipt_photo set exported_at = to_timestamp($2::float8 / 1000)
      where id = any($1::bigint[]) and (exported_at is null or exported_at < to_timestamp($2::float8 / 1000))`,
     [ids, token],
+    me,
   );
 
 // After the admin confirmed the zip saved: exactly the photos of that finished export are deleted,
@@ -88,6 +93,7 @@ export async function archiveExport(me: number, upto: number, token: number): Pr
      d as (delete from receipt_photo where id in (select id from ph) returning 1)
      select (select count(*) from d)::int as deleted`,
     [me, upto, token],
+    me,
   );
   return r.deleted;
 }

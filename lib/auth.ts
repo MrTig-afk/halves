@@ -4,8 +4,11 @@ import { hashPin, isValidPin, verifyPin } from "./pin";
 
 export const MAX_TRIES = 3;
 export const LOCK_MINUTES = 5;
+export const PHONE_TRIES = 10;
+export const PHONE_MINUTES = 15;
 
 export type AuthResult =
+  | { ok: false; error: "slow_down"; until: string } // this phone has used its wrong PINs (PRD 10.4)
   | { ok: true; stamp: string } // the person's pin_stamp for the PIN just checked or set
   | { ok: false; error: "invalid_pin" | "not_found" | "unclaimed" | "claimed" }
   | { ok: false; error: "wrong_pin"; triesLeft: number }
@@ -13,7 +16,44 @@ export type AuthResult =
 
 const iso = (v: unknown) => new Date((v as string | null) ?? Date.now()).toISOString();
 
-export async function checkPin(personId: number, pin: string): Promise<AuthResult> {
+// `phone` (sign-in only): this phone's key. A try is reserved against it FIRST, before anything
+// else, so a request without a device cookie cannot get one without paying a try, and a paused phone
+// is refused even with the right PIN. The try is given back unless a wrong PIN was checked (or the
+// key is an address key, whose tries are never given back).
+export async function checkPin(personId: number, pin: string, phone?: string): Promise<AuthResult> {
+  if (!phone) return checkTile(personId, pin);
+  const [mine] = await query<{ n: number; at: string; until: string }>(
+    `insert into pin_throttle as t (client, wrong) values ($1, array[clock_timestamp()])
+     on conflict (client) do update
+       set wrong = array(select x from unnest(t.wrong) x where x > now() - make_interval(mins => $3)) || clock_timestamp()
+       where (select count(*) from unnest(t.wrong) x where x > now() - make_interval(mins => $3)) < $2
+     returning cardinality(wrong)::int as n, wrong[cardinality(wrong)]::text as at,
+               ((select min(x) from unnest(wrong) x) + make_interval(mins => $3))::text as until`,
+    [phone, PHONE_TRIES, PHONE_MINUTES],
+  );
+  if (!mine) {
+    const [p] = await query<{ until: string }>(
+      `select (min(x) + make_interval(mins => $2))::text as until from pin_throttle, unnest(wrong) x
+       where client = $1 and x > now() - make_interval(mins => $2)`,
+      [phone, PHONE_MINUTES],
+    );
+    return { ok: false, error: "slow_down", until: iso(p?.until) };
+  }
+  const checked = { wrongPin: false };
+  try {
+    const r = await checkTile(personId, pin, checked);
+    if (checked.wrongPin && mine.n === PHONE_TRIES) return { ok: false, error: "slow_down", until: iso(mine.until) };
+    return r;
+  } finally {
+    // Given back unless a wrong PIN was checked - also when the check failed (a database error is no guess).
+    // A failed give-back only leaves the try spent; it never turns the answer into an error.
+    if (!checked.wrongPin && !phone.startsWith("ip:")) {
+      await query("update pin_throttle set wrong = array_remove(wrong, $2::timestamptz) where client = $1", [phone, mine.at]).catch(() => {});
+    }
+  }
+}
+
+async function checkTile(personId: number, pin: string, checked?: { wrongPin: boolean }): Promise<AuthResult> {
   if (!isValidPin(pin)) return { ok: false, error: "invalid_pin" };
   // Reserve one try BEFORE verifying, in one atomic statement, and write the lock in that same
   // statement when the last try is reserved. So a burst of parallel guesses gets at most
@@ -39,7 +79,9 @@ export async function checkPin(personId: number, pin: string): Promise<AuthResul
     return { ok: false, error: "locked", lockedUntil: iso(rows[0].locked_until) };
   }
   const r = reserved[0];
-  if (await verifyPin(pin, r.pin_hash)) {
+  const right = await verifyPin(pin, r.pin_hash);
+  if (checked) checked.wrongPin = !right;
+  if (right) {
     // Only for the PIN just checked: a slow check of an old PIN must not lift the new one's lock.
     await query("update person set failed_pin_count = 0, locked_until = null where id = $1 and pin_stamp = $2::uuid", [personId, r.pin_stamp]);
     return { ok: true, stamp: r.pin_stamp }; // read with the hash that was verified
