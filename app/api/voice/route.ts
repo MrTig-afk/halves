@@ -1,8 +1,9 @@
 // POST /api/voice - multipart "file" (a short recording) + "items" (JSON list of the bill's item
 // names, in order) + "people" (JSON ids of everyone on the bill) -> what was heard and who had which
-// items. Only the recording and the item names go to the AI; names are matched here. Nothing is stored.
+// items. The recording, item names and first names go to Groq; Gemini (last fallback) never gets a name. Nothing is stored.
 // Signed-in devices only: every call spends the shared free AI allowance.
-import { GeminiError, pausedUntil, readVoice } from "@/lib/gemini";
+import { GeminiError, pausedUntil } from "@/lib/gemini";
+import { hearVoice } from "@/lib/groq";
 import { people as everyone } from "@/lib/people";
 import { MAX_NAME } from "@/lib/receipt";
 import { fail } from "@/lib/http";
@@ -71,10 +72,10 @@ export async function POST(req: Request) {
 
   const started = Date.now();
   try {
-    // The names are read alongside the AI call (they never go to it).
-    const [{ reading, model }, all] = await Promise.all([readVoice(audio, mime, items), everyone()]);
+    // First names go to Groq (Whisper's spelling hint and the gpt-oss prompt); the Gemini fallback never gets them. Names are matched here.
+    const on = (await everyone()).filter((p) => ids.includes(p.id));
+    const { reading, model } = await hearVoice(audio, mime, items, on.map((p) => p.name.split(" ")[0]));
     console.info(JSON.stringify({ event: "voice_read", ms: Date.now() - started, model, changes: reading.changes.length, dropped: reading.dropped.length }));
-    const on = all.filter((p) => ids.includes(p.id));
     const onIds = on.map((p) => p.id);
     // "me" and "everyone" (in the forms the prompt allows) are the speaker and the bill's people; a
     // pronoun for another person ("them") is that person only on a bill of two; a name not on the
