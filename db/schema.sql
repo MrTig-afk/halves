@@ -137,7 +137,7 @@ BEGIN
              WHERE bill_person.settlement_id IS NULL AND EXCLUDED.settlement_id IS NOT NULL';
     EXECUTE 'INSERT INTO line_item_person (line_item_id, person_id)
              SELECT li.id, b.payer_id FROM line_item li JOIN bill b ON b.id = li.bill_id
-             WHERE li.kind = ''item'' AND li.share IN (''payer'', ''split'') AND b.partner_id IS NOT NULL
+             WHERE li.kind = ''item'' AND (li.share IN (''payer'', ''split'') OR li.share IS NULL) AND b.partner_id IS NOT NULL
              UNION ALL
              SELECT li.id, b.partner_id FROM line_item li JOIN bill b ON b.id = li.bill_id
              WHERE li.kind = ''item'' AND li.share IN (''partner'', ''split'') AND b.partner_id IS NOT NULL

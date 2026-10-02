@@ -8,7 +8,7 @@ import { useVoice } from "@/components/useVoice";
 import { useRouter } from "next/navigation";
 import { clock, postBill, type VoiceResult } from "@/lib/api";
 import { MAX_NAME, type ReceiptReading } from "@/lib/receipt";
-import { MAX_BILL_CENTS } from "@/lib/bill";
+import { MAX_BILL_CENTS, type Saved } from "@/lib/bill";
 import { formatCents, parseCents } from "@/lib/money";
 import { firstName as first, initial } from "@/lib/names";
 import type { LineKind } from "@/lib/receipt";
@@ -25,7 +25,8 @@ export type Draft = {
   photo: Blob | null; // the cropped receipt, kept with the bill
   ai: ReceiptReading | null; // what the AI read, stored unchanged
 };
-export type SavedBill = { description: string; partnerName: string; owes: number; was: number; photo: string; notified: boolean };
+// What the server answered, plus the names of the people it speaks of (the Saved screen).
+export type SavedBill = { saved: Saved; names: Record<number, string> };
 
 const ORDER: Share[] = ["payer", "split", "partner"];
 type Snapshot = { shares: Map<number, Share>; partnerId: number | null }; // what a voice change replaced
@@ -33,12 +34,14 @@ let nextKey = 1_000_000;
 
 export function Review({
   me,
+  meId,
   partners,
   draft,
   onBack,
   onSaved,
 }: {
   me: string;
+  meId: number;
   partners: Partner[];
   draft: Draft;
   onBack: () => void;
@@ -113,7 +116,8 @@ export function Review({
     const r = await postBill(
       {
         scan_id: draft.scan_id,
-        partner_id: partnerId,
+        people: [meId, partnerId],
+        payer_id: meId,
         description: description.trim(),
         date,
         total_cents: total,
@@ -121,18 +125,19 @@ export function Review({
           name: row.name.trim() || (row.kind === "item" ? "Item" : row.kind === "discount" ? "Discount" : "Fee"),
           price_cents: row.price_cents,
           kind: row.kind,
-          share: row.kind === "item" ? row.share : null,
+          people: row.kind !== "item" ? null : row.share === "payer" ? [meId] : row.share === "split" ? [meId, partnerId] : [partnerId],
         })),
         ai: draft.ai,
         typed: false,
+        date_edited: false, // T7 sends the real signals; edited() still compares a read date and total
+        total_edited: false,
       },
       draft.photo,
     );
     setSaving(false);
     if (r.ok) {
       // A retried save answers with the bill stored the first time, which is the one to show.
-      const stored = partners.find((p) => p.id === r.partner_id);
-      return onSaved({ description: r.description, partnerName: stored ? first(stored.name) : partnerName, owes: r.owes, was: r.was, photo: r.photo, notified: r.notified });
+      return onSaved({ saved: r, names: Object.fromEntries(partners.map((p) => [p.id, p.name])) });
     }
     if (r.error === "signed_out") return router.replace("/signin");
     // Anything worth sending again (no connection, a timeout, a server failure) gets the approved

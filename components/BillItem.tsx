@@ -8,7 +8,11 @@ import type { BillRow } from "@/lib/tab";
 export function BillItem({ b, me, href, settled }: { b: BillRow; me: number; href: string; settled?: boolean }) {
   const { day, month } = dayMonth(b.bill_date);
   const iPaid = b.payer_id === me;
-  const other = firstName(iPaid ? b.partner : b.payer);
+  const other = firstName(iPaid ? (b.others[0]?.name ?? "") : b.payer);
+  const you = `You ${settled ? "owed" : "owe"}`;
+  // Two people read as ever; with three or more there is no one name to put on it ("owed $X" is the
+  // total owed to me on it).
+  const words = !iPaid ? you : b.size > 2 ? "owed" : `${other} ${settled ? "owed" : "owes"}`;
   return (
     <Link href={href} className="li">
       <div className="date">
@@ -20,13 +24,13 @@ export function BillItem({ b, me, href, settled }: { b: BillRow; me: number; hre
           <b>{b.description}</b>
         </div>
         <div className="xs dim">
-          {iPaid ? "You" : other} paid {formatCents(b.total_cents)}
+          {iPaid ? "You" : firstName(b.payer)} paid {formatCents(b.total_cents)}
         </div>
       </div>
       <div className={`xs num right ${iPaid ? "owed" : "owe"}`}>
-        {iPaid ? `${other} ${settled ? "owed" : "owes"}` : `You ${settled ? "owed" : "owe"}`}
+        {words}
         <br />
-        {formatCents(b.partner_owes_cents)}
+        {formatCents(b.amount)}
       </div>
     </Link>
   );

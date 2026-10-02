@@ -11,5 +11,5 @@ export default async function ScanPage() {
   const me = await currentPerson();
   if (!me) redirect("/signin");
   const partners = await query<{ id: number; name: string }>("select id::int as id, name from person where id <> $1 order by id", [me.id]);
-  return <ScanFlow me={me.name} partners={partners} />;
+  return <ScanFlow me={me.name} meId={me.id} partners={partners} />;
 }

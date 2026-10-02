@@ -10,5 +10,5 @@ export default async function AddPage() {
   const me = await currentPerson();
   if (!me) redirect("/signin");
   const partners = await query<{ id: number; name: string }>("select id::int as id, name from person where id <> $1 order by id", [me.id]);
-  return <QuickBill partners={partners} />;
+  return <QuickBill meId={me.id} partners={partners} />;
 }

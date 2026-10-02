@@ -11,6 +11,7 @@ import { Review, type Draft, type Partner, type SavedBill } from "@/components/R
 import { clock, postReceipt, type ApiFailure } from "@/lib/api";
 import { cropToJpeg, loadImage, type CropRect } from "@/lib/cropImage";
 import { formatCents } from "@/lib/money";
+import { firstName } from "@/lib/names";
 import type { ReceiptReading } from "@/lib/receipt";
 
 type Step =
@@ -39,7 +40,7 @@ function draftFrom(reading: ReceiptReading | null, photo: Blob): Draft {
   };
 }
 
-export function ScanFlow({ me, partners }: { me: string; partners: Partner[] }) {
+export function ScanFlow({ me, meId, partners }: { me: string; meId: number; partners: Partner[] }) {
   const router = useRouter();
   const [step, setStep] = useState<Step>({ k: "pick" });
   const camera = useRef<HTMLInputElement>(null);
@@ -82,7 +83,7 @@ export function ScanFlow({ me, partners }: { me: string; partners: Partner[] }) 
     );
   }
   if (step.k === "review") {
-    return <Review me={me} partners={partners} draft={step.draft} onBack={() => setStep({ k: "pick" })} onSaved={(saved) => setStep({ k: "saved", saved })} />;
+    return <Review me={me} meId={meId} partners={partners} draft={step.draft} onBack={() => setStep({ k: "pick" })} onSaved={(saved) => setStep({ k: "saved", saved })} />;
   }
   if (step.k === "saved") return <Saved s={step.saved} again={() => setStep({ k: "pick" })} done={() => router.push("/")} />;
   if (step.k === "failed") {
@@ -190,9 +191,15 @@ function Failed({ failure, recrop, retry, byHand, back }: { failure: ApiFailure;
   );
 }
 
-export function Saved({ s, again, done, againLabel = "Scan another" }: { s: SavedBill; again: () => void; done: () => void; againLabel?: string }) {
-  const now = s.was + s.owes;
-  const tab = (c: number) => (c >= 0 ? `${s.partnerName} owes you ${formatCents(c)}` : `You owe ${s.partnerName} ${formatCents(-c)}`);
+// Two people: one share and one tab, as ever. (More people get their own screen in T6.)
+export function Saved({ s: { saved, names }, again, done, againLabel = "Scan another" }: { s: SavedBill; again: () => void; done: () => void; againLabel?: string }) {
+  const pid = saved.tabs[0]?.person_id ?? saved.shares[0]?.person_id;
+  const partnerName = pid === undefined ? "your partner" : firstName(names[pid] ?? "your partner");
+  const owes = saved.shares.find((x) => x.person_id === pid)?.owes ?? 0;
+  const was = saved.tabs.find((x) => x.person_id === pid)?.was ?? 0;
+  const notified = pid !== undefined && saved.notified.includes(pid);
+  const now = was + owes;
+  const tab = (c: number) => (c >= 0 ? `${partnerName} owes you ${formatCents(c)}` : `You owe ${partnerName} ${formatCents(-c)}`);
   return (
     <main className="screen">
       <div className="center">
@@ -201,15 +208,15 @@ export function Saved({ s, again, done, againLabel = "Scan another" }: { s: Save
         </div>
         <b style={{ fontSize: 17 }}>Saved</b>
         <div className="small">
-          <b>{s.description}</b> · {s.partnerName} owes <span className="num">{formatCents(s.owes)}</span>
+          <b>{saved.description}</b> · {partnerName} owes <span className="num">{formatCents(owes)}</span>
         </div>
         <div className="soft">
-          <div className="xs dim">Your tab with {s.partnerName}</div>
+          <div className="xs dim">Your tab with {partnerName}</div>
           <div className={`num tab-amt ${now >= 0 ? "owed" : "owe"}`}>{tab(now)}</div>
-          <div className="xs dim num">was {s.was >= 0 ? formatCents(s.was) : tab(s.was)}</div>
+          <div className="xs dim num">was {was >= 0 ? formatCents(was) : tab(was)}</div>
         </div>
-        {s.notified && <span className="dim xs">{s.partnerName} has been notified.</span>}
-        {s.photo === "not_kept_full" && <span className="dim xs">Photo not kept: photo storage is full. Export photos in Settings to free space.</span>}
+        {notified && <span className="dim xs">{partnerName} has been notified.</span>}
+        {saved.photo === "not_kept_full" && <span className="dim xs">Photo not kept: photo storage is full. Export photos in Settings to free space.</span>}
       </div>
       <div className="foot">
         <button type="button" className="btn" onClick={again}>

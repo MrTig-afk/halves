@@ -1,4 +1,4 @@
-// GET /api/bill/<id>/photo - the kept receipt photo, only for the bill's payer or partner.
+// GET /api/bill/<id>/photo - the kept receipt photo, only for someone on the bill.
 // Anything else - no such bill, someone else's bill, no photo - is the same 404.
 import { query } from "@/lib/db";
 import { currentPerson } from "@/lib/session";
@@ -11,8 +11,9 @@ export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> 
   if (!me || id === null) return notFound();
   const [p] = await query<{ jpeg: Buffer }>(
     `select p.jpeg from receipt_photo p join bill b on b.id = p.bill_id
-     where b.id = $1 and (b.payer_id = $2 or b.partner_id = $2)`,
+     where b.id = $1 and exists (select 1 from bill_person m where m.bill_id = b.id and m.person_id = $2)`,
     [id, me.id],
+    me.id,
   );
   if (!p) return notFound();
   return new Response(new Uint8Array(p.jpeg), {

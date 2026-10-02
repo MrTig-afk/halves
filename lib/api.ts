@@ -2,7 +2,7 @@
 // network error): the server already retries Gemini itself, so retrying anything else would
 // multiply free-tier calls. Every other failure is shown, and `retryable` tells the UI to
 // offer Try again.
-import type { NewBill, Saved } from "./bill";
+import type { BillBody, Saved } from "./bill";
 import type { ReceiptReading } from "./receipt";
 import type { VoiceReply } from "./voice";
 
@@ -69,7 +69,7 @@ export async function postVoice(audio: Blob, items: string[]): Promise<VoiceResu
 }
 
 // Sending the same bill twice is safe: the scan id makes the server save it once.
-export async function postBill(bill: NewBill, photo: Blob | null): Promise<SaveResult> {
+export async function postBill(bill: BillBody, photo: Blob | null): Promise<SaveResult> {
   const r = await send("/api/bill", () => {
     const form = new FormData();
     form.append("bill", JSON.stringify(bill));

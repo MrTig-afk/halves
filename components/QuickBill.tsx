@@ -33,7 +33,7 @@ const remember = (id: string | null) => {
   } catch {}
 };
 
-export function QuickBill({ partners }: { partners: Partner[] }) {
+export function QuickBill({ meId, partners }: { meId: number; partners: Partner[] }) {
   const router = useRouter();
   const [scanId, setScanId] = useState(() => pendingId() ?? uuid()); // one per bill: a retried Save can never add it twice
   const [description, setDescription] = useState("");
@@ -66,7 +66,19 @@ export function QuickBill({ partners }: { partners: Partner[] }) {
     remember(id);
     const name = description.trim();
     const r = await postBill(
-      { scan_id: id, partner_id: partnerId, description: name, date, total_cents: cents, lines: [{ name, price_cents: cents, kind: "item", share }], ai: null, typed: true },
+      {
+        scan_id: id,
+        people: [meId, partnerId],
+        payer_id: meId,
+        description: name,
+        date,
+        total_cents: cents,
+        lines: [{ name, price_cents: cents, kind: "item", people: share === "split" ? [meId, partnerId] : [partnerId] }],
+        ai: null,
+        typed: true,
+        date_edited: false,
+        total_edited: false,
+      },
       null,
     );
     setSaving(false);
@@ -86,8 +98,7 @@ export function QuickBill({ partners }: { partners: Partner[] }) {
       return setSaveError({ text: `Your earlier bill "${r.description}" ${formatCents(r.total_cents)} was saved. This one isn't yet - tap Save.`, retry: false });
     }
     if (r.ok) {
-      const stored = partners.find((p) => p.id === r.partner_id);
-      return setSaved({ description: r.description, partnerName: stored ? firstName(stored.name) : partnerName, owes: r.owes, was: r.was, photo: r.photo, notified: r.notified });
+      return setSaved({ saved: r, names: Object.fromEntries(partners.map((p) => [p.id, p.name])) });
     }
     if (r.error === "signed_out") return router.replace("/signin");
     if (r.retryable) setPicked(date); // Retry sends exactly this, even after midnight
