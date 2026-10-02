@@ -113,7 +113,7 @@ CREATE TABLE IF NOT EXISTS line_item_person (
 -- Wrong PINs per phone. client = 'd:<device id>' (signed device cookie) or 'ip:<keyed hash>' (a
 -- request without one); wrong = the moments of its wrong PINs in the last 15 minutes. No RLS:
 -- written before anyone is signed in; holds no name, PIN or raw address.
--- ponytail: rows are never deleted (one small row per phone or address); add a sweep if the table ever matters.
+-- Rows are never deleted (one small row per phone or address); add a sweep if the table ever matters.
 CREATE TABLE IF NOT EXISTS pin_throttle (
   client  text          PRIMARY KEY,
   wrong   timestamptz[] NOT NULL

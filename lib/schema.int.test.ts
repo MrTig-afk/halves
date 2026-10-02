@@ -97,7 +97,7 @@ describe.skipIf(!process.env.DATABASE_URL)("the database schema", async () => {
   });
 
   // TEMPORARY (deleted with the old columns): a settle the old code makes after the copy reaches the
-  // share on the next migration (spec phase B -> C). Runs the migration twice, on dev only.
+  // share on the next migration, run again before the new code goes live. Runs the migration twice, on dev only.
   it("carries a settle the old code made after the copy over on the next migration", async () => {
     const migrate = () => expect(execFileSync(process.execPath, ["scripts/migrate.mjs"], { encoding: "utf8" })).toMatch(/target: dev/);
     const [b] = await query<{ id: number }>(
