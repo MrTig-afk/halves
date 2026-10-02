@@ -9,7 +9,7 @@ import { useSave } from "@/components/useSave";
 import { useVoice } from "@/components/useVoice";
 import { clock, type VoiceResult } from "@/lib/api";
 import { edited, MAX_BILL_CENTS, type Saved } from "@/lib/bill";
-import { breakdownView, typedFoot, voiceSet } from "@/lib/billview";
+import { breakdownView, typedFoot } from "@/lib/billview";
 import { formatCents, parseCents } from "@/lib/money";
 import { editedAt, firstName as first } from "@/lib/names";
 import { MAX_NAME, type LineKind, type ReceiptReading } from "@/lib/receipt";
@@ -88,28 +88,30 @@ export function Review({
     const sets = new Map<number, number[]>();
     for (const c of r.changes) {
       const key = sent.current[c.item - 1];
-      const set = voiceSet(c.share, now.current.onBill, meId);
-      if (key !== undefined && set) sets.set(key, set);
+      const set = c.people.filter((p) => now.current.onBill.includes(p));
+      if (key !== undefined && set.length) sets.set(key, set);
     }
     if (!sets.size) return;
     const before: Snapshot = new Map();
+    const moved = new Set<number>(); // only rows whose people changed flash (Artifact B6)
     setRows(
       now.current.rows.map((row) => {
         const set = sets.get(row.key);
         if (!set || row.kind !== "item") return row;
         before.set(row.key, row.set);
+        if (set.length !== row.set.length || set.some((p) => !row.set.includes(p))) moved.add(row.key);
         return { ...row, set };
       }),
     );
-    setUndo(before);
-    setFlash(new Set(sets.keys()));
+    if (moved.size) setUndo(before); // nothing to keep or undo when every set was already so
+    setFlash(moved);
     setTimeout(() => setFlash(new Set()), 1400);
   };
   const voice = useVoice(() => {
     const items = rows.filter((r) => r.kind === "item");
     sent.current = items.map((r) => r.key);
     return items.map((r, i) => r.name.trim() || `Item ${i + 1}`);
-  }, heard);
+  }, () => now.current.onBill, heard);
   const settle = (restore: boolean) => {
     if (restore && undo) setRows((rs) => rs.map((r) => (undo.has(r.key) ? { ...r, set: undo.get(r.key)! } : r)));
     setUndo(null);
@@ -257,19 +259,18 @@ export function Review({
           multi={false}
         />
         <div className="xs dim">Every item starts shared by everyone. Tap the green names to change who had it.</div>
-        {(voice.state.k !== "idle" || note) && (
-          <div className="voice" role="status">
-            {voice.state.k === "listening" ? (
-              <span className="dim xs">Listening… tap the mic again when you are done</span>
-            ) : voice.state.k === "working" ? (
-              <span className="dim xs">Working it out…</span>
-            ) : voice.state.k === "done" ? (
-              <Heard r={voice.state.result} />
-            ) : (
-              <span className="dim xs">{note}</span>
-            )}
-          </div>
-        )}
+        {/* Always there (Artifact B6), so nothing below it moves when voice starts. */}
+        <div className="voice" role="status">
+          {voice.state.k === "listening" ? (
+            <span className="dim xs">Listening…</span>
+          ) : voice.state.k === "working" ? (
+            <span className="dim xs">Working it out…</span>
+          ) : voice.state.k === "done" ? (
+            <Heard r={voice.state.result} />
+          ) : (
+            <span className="dim xs">{note ?? "Tap the mic and say who had what"}</span>
+          )}
+        </div>
         <div className="ihead">
           <span className="grow">Item</span>
           <span style={{ width: 88, textAlign: "right" }}>Price</span>

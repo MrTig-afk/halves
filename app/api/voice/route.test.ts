@@ -1,17 +1,18 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { GeminiError } from "@/lib/gemini";
 
-const { readVoice, currentPerson, query } = vi.hoisted(() => ({ readVoice: vi.fn(), currentPerson: vi.fn(), query: vi.fn() }));
+const { readVoice, currentPerson, people } = vi.hoisted(() => ({ readVoice: vi.fn(), currentPerson: vi.fn(), people: vi.fn() }));
 vi.mock("@/lib/gemini", async (orig) => ({ ...(await orig<typeof import("@/lib/gemini")>()), readVoice }));
 vi.mock("@/lib/session", () => ({ currentPerson }));
-vi.mock("@/lib/db", () => ({ query }));
+vi.mock("@/lib/people", () => ({ people }));
 const { POST } = await import("./route");
 
 const WEBM = Buffer.concat([Buffer.from([0x1a, 0x45, 0xdf, 0xa3]), Buffer.alloc(100)]);
-const post = (bytes: Buffer, items: unknown = ["MILK", "BREAD"]) => {
+const post = (bytes: Buffer, items: unknown = ["MILK", "BREAD"], ids: unknown = [1, 7, 8]) => {
   const form = new FormData();
   form.append("file", new Blob([new Uint8Array(bytes)], { type: "audio/webm" }), "voice");
   form.append("items", typeof items === "string" ? items : JSON.stringify(items));
+  if (ids !== null) form.append("people", typeof ids === "string" ? ids : JSON.stringify(ids));
   return POST(new Request("http://x/api/voice", { method: "POST", body: form }));
 };
 const json = async (res: Response) => ({ status: res.status, ...(await res.json()) });
@@ -19,7 +20,12 @@ const json = async (res: Response) => ({ status: res.status, ...(await res.json(
 beforeEach(() => {
   readVoice.mockReset();
   currentPerson.mockResolvedValue({ id: 1, name: "Kaushik", role: "admin" });
-  query.mockResolvedValue([{ id: 7, name: "Soham" }]);
+  people.mockResolvedValue([
+    { id: 1, name: "Kaushik" },
+    { id: 7, name: "Rahul" },
+    { id: 8, name: "Priya" },
+    { id: 9, name: "Ana" },
+  ]);
 });
 
 describe("POST /api/voice", () => {
@@ -30,7 +36,7 @@ describe("POST /api/voice", () => {
   });
 
   it("takes the audio type from the bytes, not the browser's label", async () => {
-    readVoice.mockResolvedValueOnce({ reading: { transcript: "t", changes: [], dropped: [], partner_name: null }, model: "m" });
+    readVoice.mockResolvedValueOnce({ reading: { transcript: "t", changes: [], dropped: [] }, model: "m" });
     const wav = Buffer.concat([Buffer.from("RIFF\0\0\0\0WAVEfmt ", "latin1"), Buffer.alloc(100)]); // labelled audio/webm by post()
     expect((await post(wav)).status).toBe(200);
     expect(readVoice.mock.calls[0][1]).toBe("audio/wav");
@@ -49,21 +55,62 @@ describe("POST /api/voice", () => {
   });
 
   it("takes an item name as long as the receipt allows", async () => {
-    readVoice.mockResolvedValueOnce({ reading: { transcript: "t", changes: [], dropped: [], partner_name: null }, model: "m" });
+    readVoice.mockResolvedValueOnce({ reading: { transcript: "t", changes: [], dropped: [] }, model: "m" });
     expect((await post(WEBM, Array(200).fill("x".repeat(200)))).status).toBe(200);
   });
 
-  it("sends only the audio and item names, and maps a spoken name to the person's id", async () => {
-    readVoice.mockResolvedValueOnce({ reading: { transcript: "t", changes: [{ item: 1, share: "split" }], dropped: [3], partner_name: "soham" }, model: "m" });
-    const r = await json(await post(WEBM));
-    expect(r).toMatchObject({ status: 200, partner: 7, dropped: [3], changes: [{ item: 1, share: "split" }] });
-    expect(r).not.toHaveProperty("partner_name");
+  it("refuses a bad people field before calling Gemini", async () => {
+    for (const ids of [null, "not json", [1], [1, 7, 8, 9, 10, 11], [1, 7, 7], [7, 8], [1, 0], [1, "7"], [1, 1.5], {}]) {
+      expect(await json(await post(WEBM, ["MILK"], ids))).toMatchObject({ status: 400, error: "bad_items" });
+    }
+    expect(readVoice).not.toHaveBeenCalled();
+  });
+
+  it("sends only the audio and item names, never a person's name", async () => {
+    readVoice.mockResolvedValueOnce({ reading: { transcript: "t", changes: [], dropped: [] }, model: "m" });
+    await post(WEBM);
     expect(readVoice.mock.calls[0].slice(2)).toEqual([["MILK", "BREAD"]]);
   });
 
-  it("answers partner null for a name that is nobody here", async () => {
-    readVoice.mockResolvedValueOnce({ reading: { transcript: "t", changes: [], dropped: [], partner_name: "Priya" }, model: "m" });
-    expect(await json(await post(WEBM))).toMatchObject({ status: 200, partner: null });
+  it("maps me, everyone and names to the bill's people ids", async () => {
+    readVoice.mockResolvedValueOnce({
+      reading: {
+        transcript: "t",
+        changes: [
+          { item: 1, who: ["me"] },
+          { item: 2, who: ["Everyone"] },
+          { item: 3, who: ["Rahul's"] },
+          { item: 4, who: ["me", "priya"] },
+          { item: 5, who: ["Ana's"] },
+          { item: 6, who: ["me", "Ana"] },
+        ],
+        dropped: [9],
+      },
+      model: "m",
+    });
+    const r = await json(await post(WEBM, ["a", "b", "c", "d", "e", "f"], [1, 7, 8]));
+    expect(r).toMatchObject({
+      status: 200,
+      dropped: [9],
+      changes: [{ item: 1, people: [1] }, { item: 2, people: [1, 7, 8] }, { item: 3, people: [7] }, { item: 4, people: [1, 8] }, { item: 6, people: [1] }],
+    });
+  });
+
+  it("takes the speaker's and everyone's other spoken forms, punctuation and all", async () => {
+    readVoice.mockResolvedValueOnce({
+      reading: { transcript: "t", changes: [{ item: 1, who: ["I"] }, { item: 2, who: ["Mine."] }, { item: 3, who: ["All"] }, { item: 4, who: ["Everybody!"] }], dropped: [] },
+      model: "m",
+    });
+    const r = await json(await post(WEBM, ["a", "b", "c", "d"], [1, 7, 8]));
+    expect(r.changes).toEqual([{ item: 1, people: [1] }, { item: 2, people: [1] }, { item: 3, people: [1, 7, 8] }, { item: 4, people: [1, 7, 8] }]);
+  });
+
+  it("reads split/shared as everyone, and a pronoun as the other person only on a bill of two", async () => {
+    const reply = { transcript: "t", changes: [{ item: 1, who: ["split"] }, { item: 2, who: ["them"] }, { item: 3, who: ["Hers"] }], dropped: [] };
+    readVoice.mockResolvedValueOnce({ reading: reply, model: "m" });
+    expect((await json(await post(WEBM, ["a", "b", "c"], [1, 7]))).changes).toEqual([{ item: 1, people: [1, 7] }, { item: 2, people: [7] }, { item: 3, people: [7] }]);
+    readVoice.mockResolvedValueOnce({ reading: reply, model: "m" });
+    expect((await json(await post(WEBM, ["a", "b", "c"], [1, 7, 8]))).changes).toEqual([{ item: 1, people: [1, 7, 8] }]); // no one person to give "them" to
   });
 
   it("pauses voice on the free-tier limit and says until when", async () => {

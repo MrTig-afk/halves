@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { breakdownView, savedView, typedFoot, typedHint, voiceSet } from "./billview";
+import { breakdownView, savedView, typedFoot, typedHint } from "./billview";
 import type { Saved } from "./bill";
 
 const on = [{ id: 1, name: "Kaushik Rao" }, { id: 2, name: "Priya Shah" }, { id: 3, name: "Rahul" }];
@@ -132,16 +132,5 @@ describe("breakdownView", () => {
     const lines = [{ name: " ", price_cents: 1000, kind: "item", people: [K, R] }, { name: "Fee", price_cents: 100, kind: "surcharge" }] as Lines;
     const v = breakdownView(lines, trio, P, 1100, K, K);
     expect(v.rows).toEqual([{ label: "Item", n: 2, cents: 500 }, { label: "Card fee, your share", n: 1, cents: 50 }]);
-  });
-});
-
-describe("voiceSet", () => {
-  it("maps the old three words onto people", () => {
-    expect(voiceSet("split", [K, P, R], K)).toEqual([K, P, R]);
-    expect(voiceSet("payer", [K, P, R], K)).toEqual([K]);
-    expect(voiceSet("partner", [K, P], K)).toEqual([P]);
-  });
-  it("has no partner on a bill of three or more", () => {
-    expect(voiceSet("partner", [K, P, R], K)).toBeNull();
   });
 });

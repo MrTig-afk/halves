@@ -3,7 +3,7 @@
 import type { Saved } from "./bill";
 import { formatCents } from "./money";
 import { firstName, listNames } from "./names";
-import { breakdown, type Share, type SplitLine } from "./split";
+import { breakdown, type SplitLine } from "./split";
 
 type Person = { id: number; name: string };
 
@@ -83,12 +83,4 @@ export function breakdownView(lines: (SplitLine & { name: string })[], on: Perso
     rounding: b.rounding ? `${b.rounding > 0 ? "+" : "-"}${formatCents(Math.abs(b.rounding))}` : null,
     not: not.length ? `Not ${q === me ? "yours" : `${nm(q)}'s`}: ${not.join(", ")}.` : null,
   };
-}
-
-// Transitional, until T8: the voice reply still says "mine / split / partner". "partner" has an
-// answer only on a bill of exactly two; null: skip that change.
-export function voiceSet(share: Share, on: number[], me: number): number[] | null {
-  if (share === "split") return on.slice();
-  if (share === "payer") return [me];
-  return on.length === 2 ? on.filter((p) => p !== me) : null;
 }

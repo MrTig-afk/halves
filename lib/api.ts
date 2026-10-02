@@ -58,11 +58,12 @@ export async function postReceipt(jpeg: Blob, attempts = 2): Promise<ReadResult>
   return r.ok ? { ok: true, reading: r.body as ReceiptReading } : r;
 }
 
-export async function postVoice(audio: Blob, items: string[]): Promise<VoiceResult> {
+export async function postVoice(audio: Blob, items: string[], people: number[]): Promise<VoiceResult> {
   const r = await send("/api/voice", () => {
     const form = new FormData();
     form.append("file", audio, "voice");
     form.append("items", JSON.stringify(items));
+    form.append("people", JSON.stringify(people));
     return form;
   });
   return r.ok ? { ok: true, ...(r.body as VoiceReply) } : r;

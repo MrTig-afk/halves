@@ -3,7 +3,6 @@
 import { firstName } from "./names";
 import type { LineKind } from "./receipt";
 
-export type Share = "payer" | "split" | "partner";
 // people: who had an item (2 to 5 on a bill).
 export type SplitLine = { price_cents: number; kind: LineKind; people?: number[] | null };
 
