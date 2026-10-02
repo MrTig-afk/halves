@@ -2,16 +2,34 @@
 
 // F5: Download zip -> "Did <file> save on your laptop?" -> Yes deletes exactly the photos in that
 // zip; No deletes nothing.
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 type Props = { count: number; megabytes: string; usedPercent: number; upto: number; file: string };
 
 export function PhotoExport({ count, megabytes, usedPercent, upto, file }: Props) {
   const [step, setStep] = useState<"start" | "confirm" | "done" | "unsure">("start");
   const [deleted, setDeleted] = useState(0);
-  const [token, setToken] = useState(0); // names this export; set when Download is pressed
   const [busy, setBusy] = useState(false);
+  const [armed, setArmed] = useState(false); // Yes and No wait a moment, so a double click on Download presses neither
   const [error, setError] = useState<string | null>(null);
+  const token = useRef(0); // names this export; set when Download is pressed
+  const form = useRef<HTMLFormElement>(null);
+  const tokenField = useRef<HTMLInputElement>(null);
+  const arming = useRef<ReturnType<typeof setTimeout>>(undefined);
+
+  // Posts the form into the hidden frame, inside the click itself (a browser only lets a download
+  // start from the click). The zip downloads and this screen stays; if it did not, Yes finds nothing
+  // stamped and says so - photos are only ever deleted after a whole zip was sent.
+  const start = () => {
+    setError(null);
+    token.current = Date.now(); // a fresh token per export
+    if (tokenField.current) tokenField.current.value = String(token.current);
+    form.current?.submit();
+    setArmed(false);
+    setStep("confirm");
+    clearTimeout(arming.current);
+    arming.current = setTimeout(() => setArmed(true), 2000);
+  };
 
   const confirmDelete = async () => {
     setBusy(true);
@@ -19,7 +37,7 @@ export function PhotoExport({ count, megabytes, usedPercent, upto, file }: Props
     const res = await fetch("/api/photos/archive", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ upto, token }),
+      body: JSON.stringify({ upto, token: token.current }),
     }).catch(() => null);
     setBusy(false);
     if (!res) {
@@ -71,30 +89,25 @@ export function PhotoExport({ count, megabytes, usedPercent, upto, file }: Props
           </div>
         )}
       </div>
+      {/* The export posts here, so an error answer never replaces the app. */}
+      <iframe name="photo-export" title="Photo export" hidden />
+      <form ref={form} method="post" action="/api/photos/export" target="photo-export" hidden>
+        <input type="hidden" name="upto" value={upto} />
+        <input type="hidden" name="t" defaultValue="" ref={tokenField} />
+      </form>
       <div className="foot">
         {step === "start" && (
-          <a
-            className="btn"
-            href={`/api/photos/export?upto=${upto}`}
-            download={file}
-            onClick={(e) => {
-              // A fresh token per export, set before the browser follows the link.
-              const t = Date.now();
-              e.currentTarget.href = `/api/photos/export?upto=${upto}&t=${t}`;
-              setToken(t);
-              setError(null);
-              setStep("confirm");
-            }}
-          >
+          <button type="button" className="btn" onClick={start}>
             Download zip
-          </a>
+          </button>
         )}
         {step === "confirm" && (
           <>
-            <button type="button" className="btn" disabled={busy} onClick={confirmDelete}>
+            <button type="button" className="btn" disabled={busy || !armed} onClick={confirmDelete}>
               Yes, delete them here
             </button>
-            <button type="button" className="btn ghost sm" disabled={busy} onClick={() => {
+            <button type="button" className="btn ghost sm" disabled={busy || !armed} onClick={() => {
+                clearTimeout(arming.current);
                 setError(null);
                 setStep("start");
               }}>
