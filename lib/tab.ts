@@ -87,6 +87,19 @@ export const openBills = (me: number) =>
     me,
   );
 
+// Bills with an open share between me and one other person (the payer is one of us), `amount` being
+// that pair's open share only: theirs when I paid, mine when they did.
+export const pairBills = (me: number, other: number) =>
+  query<BillRow>(
+    `select ${BILL_COLUMNS("q.owes_cents")}
+     from ${BILL_FROM}
+     join bill_person q on q.bill_id = b.id and q.person_id = case when b.payer_id = $1 then $2::bigint else $1 end and ${OPEN}
+     where b.payer_id in ($1, $2::bigint)
+     order by b.bill_date desc, b.id desc`,
+    [me, other],
+    me,
+  );
+
 export const rounds = (me: number, only: number | null = null) =>
   query<Round>(
     `select s.id::int, s.amount_cents, s.created_at::text, s.settled_by::int, sb.name as settled_by_name,

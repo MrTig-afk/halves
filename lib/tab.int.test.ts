@@ -41,7 +41,7 @@ const live = !!process.env.DATABASE_URL;
 
 describe.skipIf(!live)("the tab on a real database", async () => {
   const { query } = await import("./db");
-  const { bill, openBills, round, rounds, settleAll, tabs } = await import("./tab");
+  const { bill, openBills, pairBills, round, rounds, settleAll, tabs } = await import("./tab");
   const { POST: saveBill } = await import("@/app/api/bill/route");
   const { GET: photo } = await import("@/app/api/bill/[id]/photo/route");
   const { default: BillPage } = await import("@/app/(app)/bill/[id]/page");
@@ -368,6 +368,23 @@ describe.skipIf(!live)("the tab on a real database", async () => {
     expect(await query("select 1 from settlement where id = $1", [r.id], C.id)).toEqual([]); // the settlement itself stays the pair's
     await settleAll(A.id, C.id, 1000);
     expect((await bill(id, C.id))!.settled_at).not.toBeNull();
+    await clean();
+  }, 120_000);
+
+  it("pairBills(A, B) lists exactly the bills with an open A-B share, at that pair's share, and nothing of A-C", async () => {
+    await clean();
+    const abc = await save(A, [A, B, C], A, [[3000, [A, B, C]]]); // B and C owe A 10.00 each
+    const ac = await save(A, [A, C], A, [[800, [A, C]]]); // A-C only
+    const ba = await save(B, [A, B], B, [[600, [A, B]]]); // A owes B 3.00
+    const bcd = await save(B, [B, C, D], B, [[900, [B, C, D]]]); // not A's
+    const asA = await pairBills(A.id, B.id);
+    expect(asA.map((b) => [b.id, b.amount])).toEqual([[ba, 300], [abc, 1000]]);
+    expect(asA.some((b) => b.id === ac || b.id === bcd)).toBe(false);
+    expect((await pairBills(B.id, A.id)).map((b) => [b.id, b.amount])).toEqual([[ba, 300], [abc, 1000]]);
+    expect((await pairBills(A.id, C.id)).map((b) => [b.id, b.amount])).toEqual([[ac, 400], [abc, 1000]]);
+    await settleAll(A.id, B.id, 700); // B owes A 1000, A owes B 300
+    expect(await pairBills(A.id, B.id)).toEqual([]); // settled shares drop off, the A-C share of abc stays with A-C
+    expect((await pairBills(A.id, C.id)).map((b) => b.id)).toEqual([ac, abc]);
     await clean();
   }, 120_000);
 
