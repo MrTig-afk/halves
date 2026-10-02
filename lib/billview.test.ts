@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { savedView, typedFoot, typedHint } from "./billview";
+import { breakdownView, savedView, typedFoot, typedHint, voiceSet } from "./billview";
 import type { Saved } from "./bill";
 
 const on = [{ id: 1, name: "Kaushik Rao" }, { id: 2, name: "Priya Shah" }, { id: 3, name: "Rahul" }];
@@ -80,5 +80,68 @@ describe("savedView", () => {
     const v = savedView({ ...base, payer_id: 3, shares: [{ person_id: 1, owes: 0 }, { person_id: 2, owes: 500 }], tabs: [{ person_id: 2, was: 0 }, { person_id: 3, was: 0 }] }, names);
     expect(v.line).toEqual([{ label: "Rahul paid" }]);
     expect(v.rows).toEqual([]);
+  });
+});
+
+// The Artifact's Coles receipt, total $49.94; K (1) paid, P (2) Priya, R (3) Rahul. Protein bar and shampoo are K's, coffee R's.
+const K = 1, P = 2, R = 3;
+const everyone = [K, P, R];
+type Lines = Parameters<typeof breakdownView>[0];
+const coles = [
+  { name: "Milk 2L", price_cents: 310, kind: "item", people: everyone },
+  { name: "Wholemeal bread", price_cents: 450, kind: "item", people: everyone },
+  { name: "Bananas 1.2kg", price_cents: 419, kind: "item", people: everyone },
+  { name: "Protein bar", price_cents: 350, kind: "item", people: [K] },
+  { name: "Chicken breast", price_cents: 1200, kind: "item", people: everyone },
+  { name: "Member price", price_cents: -200, kind: "discount" },
+  { name: "Shampoo", price_cents: 900, kind: "item", people: [K] },
+  { name: "Eggs 12pk", price_cents: 680, kind: "item", people: everyone },
+  { name: "Coffee pods", price_cents: 850, kind: "item", people: [R] },
+  { name: "Card surcharge", price_cents: 35, kind: "surcharge" },
+] as Lines;
+const trio = [{ id: K, name: "Kaushik Rao" }, { id: P, name: "Priya Shah" }, { id: R, name: "Rahul" }];
+
+describe("breakdownView", () => {
+  it("shows Priya's parts, her share of the fee and what was not hers (B5c)", () => {
+    expect(breakdownView(coles, trio, K, 4994, P, K)).toEqual({
+      head: "Priya owes you",
+      total: 960,
+      rows: [
+        { label: "Milk 2L", n: 3, cents: 103 },
+        { label: "Wholemeal bread", n: 3, cents: 150 },
+        { label: "Bananas 1.2kg", n: 3, cents: 140 },
+        { label: "Chicken breast, less discount", n: 3, cents: 333 },
+        { label: "Eggs 12pk", n: 3, cents: 227 },
+        { label: "Card fee, Priya's share", n: 1, cents: 7 },
+      ],
+      rounding: null,
+      not: "Not Priya's: Protein bar, Shampoo, Coffee pods.",
+    });
+  });
+  it("words the head by who paid, with You for the viewer, and omits Not when they had everything", () => {
+    const pizza = [{ name: "Pizza", price_cents: 2000, kind: "item", people: [K, P] }] as Lines;
+    expect(breakdownView(pizza, trio.slice(0, 2), P, 2000, K, K)).toMatchObject({ head: "You owe Priya", total: 1000, not: null });
+    expect(breakdownView(pizza, trio, R, 2000, P, K).head).toBe("Priya owes Rahul");
+  });
+  it("spells a rounding cent with its sign", () => {
+    const sushi = [{ name: "Sushi", price_cents: 1001, kind: "item", people: [P, R] }] as Lines;
+    expect(breakdownView(sushi, trio, K, 1001, R, K)).toMatchObject({ total: 500, rounding: "-$0.01" }); // 501 + 500 would be a cent over
+    expect(breakdownView(sushi, trio, K, 1001, P, K).rounding).toBeNull();
+  });
+  it("says 'your share' for the viewer's own fee, and calls an unnamed row Item", () => {
+    const lines = [{ name: " ", price_cents: 1000, kind: "item", people: [K, R] }, { name: "Fee", price_cents: 100, kind: "surcharge" }] as Lines;
+    const v = breakdownView(lines, trio, P, 1100, K, K);
+    expect(v.rows).toEqual([{ label: "Item", n: 2, cents: 500 }, { label: "Card fee, your share", n: 1, cents: 50 }]);
+  });
+});
+
+describe("voiceSet", () => {
+  it("maps the old three words onto people", () => {
+    expect(voiceSet("split", [K, P, R], K)).toEqual([K, P, R]);
+    expect(voiceSet("payer", [K, P, R], K)).toEqual([K]);
+    expect(voiceSet("partner", [K, P], K)).toEqual([P]);
+  });
+  it("has no partner on a bill of three or more", () => {
+    expect(voiceSet("partner", [K, P, R], K)).toBeNull();
   });
 });

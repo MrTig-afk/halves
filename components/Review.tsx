@@ -1,21 +1,22 @@
 "use client";
 
-// The review screen: name the bill, pick who it is with, and set each item's share with a
-// 3-position slider (mine / half / partner's). Any name or price can be tapped and edited.
+// The review screen (Artifact B5): name the bill, pick who is on it and who paid, and set who had each
+// item. Any name or price can be tapped and edited; the footer says what each person owes and why.
 import { useEffect, useRef, useState } from "react";
 import { Icon } from "@/components/Icon";
+import { Panel, PeoplePicker } from "@/components/PeoplePicker";
+import { useSave } from "@/components/useSave";
 import { useVoice } from "@/components/useVoice";
-import { useRouter } from "next/navigation";
-import { clock, postBill, saveFailure, type VoiceResult } from "@/lib/api";
-import { MAX_NAME, type ReceiptReading } from "@/lib/receipt";
-import { MAX_BILL_CENTS, type Saved } from "@/lib/bill";
+import { clock, type VoiceResult } from "@/lib/api";
+import { edited, MAX_BILL_CENTS, type Saved } from "@/lib/bill";
+import { breakdownView, typedFoot, voiceSet } from "@/lib/billview";
 import { formatCents, parseCents } from "@/lib/money";
-import { firstName as first, initial } from "@/lib/names";
-import type { LineKind } from "@/lib/receipt";
-import { partnerOwes, type Share } from "@/lib/split";
+import { editedAt, firstName as first } from "@/lib/names";
+import { MAX_NAME, type LineKind, type ReceiptReading } from "@/lib/receipt";
+import { eachCents, owes, regroup, setLabel } from "@/lib/split";
 
 export type Partner = { id: number; name: string };
-export type Row = { key: number; name: string; price_cents: number; kind: LineKind; share: Share };
+export type Row = { key: number; name: string; price_cents: number; kind: LineKind; set: number[] }; // set: who had an item
 export type Draft = {
   scan_id: string; // one per draft: a retried Save can never add the bill twice
   description: string;
@@ -28,64 +29,80 @@ export type Draft = {
 // What the server answered, plus the names of the people it speaks of (the Saved screen).
 export type SavedBill = { saved: Saved; names: Record<number, string> };
 
-const ORDER: Share[] = ["payer", "split", "partner"];
-type Snapshot = { shares: Map<number, Share>; partnerId: number | null }; // what a voice change replaced
+type Snapshot = Map<number, number[]>; // each set a voice change replaced
 let nextKey = 1_000_000;
 
+// `people`: everyone, you first then by id; `start`: who the bill starts with (lib/people.ts billPeople).
 export function Review({
-  me,
   meId,
-  partners,
+  people,
+  start,
   draft,
   onBack,
   onSaved,
 }: {
-  me: string;
   meId: number;
-  partners: Partner[];
+  people: Partner[];
+  start: number[];
   draft: Draft;
   onBack: () => void;
   onSaved: (s: SavedBill) => void;
 }) {
-  const router = useRouter();
   const [description, setDescription] = useState(draft.description);
   const [date, setDate] = useState(draft.date);
-  const [partnerId, setPartnerId] = useState(partners[0]?.id ?? 0);
-  const [rows, setRows] = useState(draft.rows);
   const [total, setTotal] = useState(draft.total_cents);
+  // The moment the person last changed the date / the total, on this phone's clock (display only:
+  // the server stamps the save time). null: never changed.
+  const [dateAt, setDateAt] = useState<string | null>(null);
+  const [totalAt, setTotalAt] = useState<string | null>(null);
+  const [onBill, setOnBill] = useState(start);
+  const [payer, setPayer] = useState(meId);
+  const [rows, setRows] = useState(draft.rows);
   const [editing, setEditing] = useState<number | null>(null);
-  const partner = partners.find((p) => p.id === partnerId);
-  const partnerName = partner ? first(partner.name) : "your partner";
-  const owes = partnerOwes(rows, total);
+  const [info, setInfo] = useState<number | null>(null); // whose breakdown is open
+  const infoBox = useRef<HTMLElement | null>(null); // the button that opened it
+
+  const on = people.filter((p) => onBill.includes(p.id));
+  const nm = (p: Partner) => (p.id === meId ? "You" : first(p.name));
+  const options = on.map((p) => ({ id: p.id, name: nm(p) }));
+  // Name order breaks a one-cent tie, as on the server.
+  const byName = [...on].sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase()) || a.id - b.id);
+  const lines = rows.map((r) => ({ name: r.name, price_cents: r.price_cents, kind: r.kind, people: r.kind === "item" ? r.set : null }));
+  const o = owes(lines, byName.map((p) => p.id), payer, total);
+  const foot = typedFoot(o, on, payer, meId);
+  const tags = edited(draft.ai, date, total, { date: dateAt !== null, total: totalAt !== null });
+  const bv = info ? breakdownView(lines, byName, payer, total, info, meId) : null;
 
   // Voice: the item numbers the AI answers with map to the rows as they were when sent. A change
-  // is applied at once (sliders animate, rows flash) and Undo puts back exactly what it replaced.
+  // is applied at once (rows flash) and Undo puts back exactly what it replaced.
   const sent = useRef<number[]>([]);
   const [flash, setFlash] = useState<Set<number>>(new Set());
   const [undo, setUndo] = useState<Snapshot | null>(null);
   const [note, setNote] = useState<string | null>(null);
-  const now = useRef({ rows, partnerId }); // the committed state, for building the Undo snapshot
+  const now = useRef({ rows, onBill }); // the committed state, for building the Undo snapshot
   useEffect(() => {
-    now.current = { rows, partnerId };
+    now.current = { rows, onBill };
   });
   const heard = (r: VoiceResult) => {
-    if (!r.ok || (!r.changes.length && r.partner === null)) return;
-    const share = new Map(r.changes.map((c) => [sent.current[c.item - 1], c.share]));
-    const before: Snapshot = { shares: new Map(), partnerId: null };
+    if (!r.ok) return;
+    const sets = new Map<number, number[]>();
+    for (const c of r.changes) {
+      const key = sent.current[c.item - 1];
+      const set = voiceSet(c.share, now.current.onBill, meId);
+      if (key !== undefined && set) sets.set(key, set);
+    }
+    if (!sets.size) return;
+    const before: Snapshot = new Map();
     setRows(
       now.current.rows.map((row) => {
-        const s = share.get(row.key);
-        if (!s || row.kind !== "item") return row;
-        before.shares.set(row.key, row.share);
-        return { ...row, share: s };
+        const set = sets.get(row.key);
+        if (!set || row.kind !== "item") return row;
+        before.set(row.key, row.set);
+        return { ...row, set };
       }),
     );
-    if (r.partner !== null && r.partner !== now.current.partnerId) {
-      before.partnerId = now.current.partnerId;
-      setPartnerId(r.partner);
-    }
     setUndo(before);
-    setFlash(new Set(share.keys()));
+    setFlash(new Set(sets.keys()));
     setTimeout(() => setFlash(new Set()), 1400);
   };
   const voice = useVoice(() => {
@@ -94,59 +111,46 @@ export function Review({
     return items.map((r, i) => r.name.trim() || `Item ${i + 1}`);
   }, heard);
   const settle = (restore: boolean) => {
-    if (restore && undo) {
-      setRows((rs) => rs.map((r) => (undo.shares.has(r.key) ? { ...r, share: undo.shares.get(r.key)! } : r)));
-      if (undo.partnerId !== null) setPartnerId(undo.partnerId);
-    }
+    if (restore && undo) setRows((rs) => rs.map((r) => (undo.has(r.key) ? { ...r, set: undo.get(r.key)! } : r)));
     setUndo(null);
     voice.reset();
-    setNote(restore ? "Undone. Tap the mic and say which items are shared." : "Applied. Tap the mic to change more.");
+    setNote(restore ? "Undone. Tap the mic and say who had what" : "Applied. Tap the mic to change more.");
   };
 
   // Save sends the lines and the total; the server works out what is owed. A failure keeps
   // everything on screen, and Retry sends the same bill again.
-  const [saving, setSaving] = useState(false);
-  const [saveError, setSaveError] = useState<{ text: string; retry: boolean } | null>(null);
-  const save = async () => {
+  const names = Object.fromEntries(people.map((p) => [p.id, p.name]));
+  const { saving, error: saveError, setError: setSaveError, send } = useSave((saved) => onSaved({ saved, names }));
+  const save = () => {
     if (rows.reduce((s, r) => s + Math.abs(r.price_cents), 0) > MAX_BILL_CENTS) {
       return setSaveError({ text: "A bill can be at most $100,000. Check the prices.", retry: false });
     }
-    setSaving(true);
-    setSaveError(null);
-    const r = await postBill(
+    return send(
       {
         scan_id: draft.scan_id,
-        people: [meId, partnerId],
-        payer_id: meId,
+        people: onBill,
+        payer_id: payer,
         description: description.trim(),
         date,
         total_cents: total,
-        lines: rows.map((row) => ({
-          name: row.name.trim() || (row.kind === "item" ? "Item" : row.kind === "discount" ? "Discount" : "Fee"),
-          price_cents: row.price_cents,
-          kind: row.kind,
-          people: row.kind !== "item" ? null : row.share === "payer" ? [meId] : row.share === "split" ? [meId, partnerId] : [partnerId],
+        lines: lines.map((l) => ({
+          ...l,
+          name: l.name.trim() || (l.kind === "item" ? "Item" : l.kind === "discount" ? "Discount" : "Fee"),
         })),
         ai: draft.ai,
         typed: false,
-        date_edited: false, // T7 sends the real signals; edited() still compares a read date and total
-        total_edited: false,
+        date_edited: dateAt !== null, // the server decides from the reading (edited()); this is only "the person changed it"
+        total_edited: totalAt !== null,
       },
       draft.photo,
     );
-    setSaving(false);
-    if (r.ok) {
-      // A retried save answers with the bill stored the first time, which is the one to show.
-      return onSaved({ saved: r, names: Object.fromEntries(partners.map((p) => [p.id, p.name])) });
-    }
-    if (r.error === "signed_out") return router.replace("/signin");
-    setSaveError(saveFailure(r)); // the same handling as the no-receipt form
   };
   // After a failure that may have reached the server, the bill might already be saved under this
   // scan id: nothing can change and Back is off, so Retry sends exactly what was shown.
   const locked = saving || !!saveError?.retry;
   const busy = saving || voice.state.k === "listening" || voice.state.k === "working";
-  const canSave = !busy && !!partner && description.trim() !== "" && date !== "" && rows.some((r) => r.kind === "item");
+  // As on the no-receipt form: nothing to save while nobody besides whoever paid owes anything (PRD 6.3).
+  const canSave = !busy && description.trim() !== "" && date !== "" && rows.some((r) => r.kind === "item") && byName.some((p) => p.id !== payer && (o[p.id] ?? 0) > 0);
 
   const update = (key: number, patch: Partial<Row>) => setRows((rs) => rs.map((r) => (r.key === key ? { ...r, ...patch } : r)));
   // Removing an item removes the discount lines under it too: a discount belongs to its item,
@@ -159,26 +163,10 @@ export function Review({
       if (rs[i]?.kind === "item") while (rs[end]?.kind === "discount") end++;
       return [...rs.slice(0, i), ...rs.slice(end)];
     });
-  // A share set by hand after a voice change keeps that change: Undo would otherwise overwrite it.
-  const all = (share: Share) => {
-    setUndo(null);
-    setRows((rs) => rs.map((r) => (r.kind === "item" ? { ...r, share } : r)));
-  };
   const add = () => {
     const key = nextKey++;
-    setRows((rs) => [...rs, { key, name: "", price_cents: 0, kind: "item", share: "split" }]);
+    setRows((rs) => [...rs, { key, name: "", price_cents: 0, kind: "item", set: onBill }]);
     setEditing(key);
-  };
-
-  const slide = (e: React.MouseEvent<HTMLButtonElement>, r: Row) => {
-    let share: Share;
-    if (e.detail === 0) share = ORDER[(ORDER.indexOf(r.share) + 1) % 3]; // keyboard: cycle
-    else {
-      const b = e.currentTarget.getBoundingClientRect();
-      share = ORDER[Math.max(0, Math.min(2, Math.floor(((e.clientX - b.left) / b.width) * 3)))];
-    }
-    setUndo(null);
-    update(r.key, { share });
   };
 
   let pos = 0;
@@ -197,40 +185,78 @@ export function Review({
             {saveError.text}
           </div>
         )}
-        <label className="field">
-          <span className="xs dim">Description</span>
-          <input className="plain b" value={description} placeholder="What was it?" onChange={(e) => setDescription(e.target.value)} maxLength={60} />
-        </label>
-        <div className="row small center-y">
-          <span className="dim">With you and</span>
-          <select className="plain b" value={partnerId} onChange={(e) => {
-              setUndo(null);
-              setPartnerId(Number(e.target.value));
-            }} aria-label="Split with">
-            {partners.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name}
-              </option>
-            ))}
-          </select>
+        <div className="field">
+          <div className="row center-y">
+            <label className="xs dim grow" htmlFor="rv-description">
+              Description
+            </label>
+            {/* The date and the receipt total, each editable (the AI can misread); an edit is marked with when it was made. */}
+            <span className="row small center-y" style={{ flexWrap: "wrap", justifyContent: "flex-end", gap: 4 }}>
+              <input
+                className="plain dim num"
+                type="date"
+                value={date}
+                aria-label="Date"
+                onChange={(e) => {
+                  setDate(e.target.value);
+                  setDateAt(new Date().toISOString());
+                }}
+              />
+              {tags.date && dateAt && <span className="edited">edited {editedAt(dateAt)}</span>}
+              {/* The dot travels with the total, so a wrapped line never starts or ends on it. */}
+              <span className="row center-y" style={{ gap: 4, flex: "none" }}>
+                <span className="dim">·</span>
+                <span style={{ width: 88 }}>
+                  <MoneyInput
+                    cents={total}
+                    label="Receipt total"
+                    allowEmpty
+                    placeholder="Total"
+                    onChange={(v) => {
+                      if (v === total) return; // focusing and leaving the box is not an edit
+                      setTotal(v);
+                      setTotalAt(new Date().toISOString());
+                    }}
+                    ok={(v) => v >= 0 && v <= MAX_BILL_CENTS}
+                  />
+                </span>
+              </span>
+              {tags.total && totalAt && <span className="edited">edited {editedAt(totalAt)}</span>}
+            </span>
+          </div>
+          <input id="rv-description" className="plain b" value={description} placeholder="What was it?" onChange={(e) => setDescription(e.target.value.replace(/[\u0000-\u001f\u007f]/g, " "))} maxLength={60} />
         </div>
-        <div className="row small center-y">
-          <input className="plain dim num" type="date" value={date} onChange={(e) => setDate(e.target.value)} aria-label="Date" />
-          <span className="dim">·</span>
-          {/* The receipt total decides All ½ and All partner's; editable in case the AI misread it. */}
-          <MoneyInput cents={total} label="Receipt total" allowEmpty placeholder="Total" onChange={setTotal} ok={(v) => v >= 0 && v <= MAX_BILL_CENTS} />
-        </div>
-        <div className="row">
-          <button type="button" className="btn ghost sm" onClick={() => all("split")}>
-            All ½
-          </button>
-          <button type="button" className="btn ghost sm" onClick={() => all("payer")}>
-            All mine
-          </button>
-          <button type="button" className="btn ghost sm" onClick={() => all("partner")}>
-            All {partnerName}&apos;s
-          </button>
-        </div>
+        <PeoplePicker
+          label="Who's on it"
+          text={on.map(nm).join(", ")}
+          title="Who's on this bill?"
+          options={people.map((p) => ({ id: p.id, name: nm(p), locked: p.id === meId }))}
+          selected={onBill}
+          onChange={(sel) => {
+            setUndo(null);
+            setRows((rs) => rs.map((r) => (r.kind === "item" ? { ...r, set: regroup(r.set, onBill, sel) } : r)));
+            if (!sel.includes(payer)) setPayer(meId);
+            setOnBill(sel);
+          }}
+          min={2}
+          minText="Add at least one other person."
+          max={5}
+          maxText="A bill can have up to 5 people."
+          note="Up to 5 people."
+        />
+        <PeoplePicker
+          label="Who paid"
+          text={nm(on.find((p) => p.id === payer) ?? on[0])}
+          title="Who paid?"
+          options={options}
+          selected={[payer]}
+          onChange={([id]) => {
+            setUndo(null);
+            setPayer(id);
+          }}
+          multi={false}
+        />
+        <div className="xs dim">Every item starts shared by everyone. Tap the green names to change who had it.</div>
         {(voice.state.k !== "idle" || note) && (
           <div className="voice" role="status">
             {voice.state.k === "listening" ? (
@@ -244,23 +270,19 @@ export function Review({
             )}
           </div>
         )}
-        <div className="row center-y">
-          <span className="grow xs dim">Slide each item</span>
-          <div className="legend">
-            <span>Mine</span>
-            <span>½</span>
-            <span>{partnerName}</span>
-          </div>
+        <div className="ihead">
+          <span className="grow">Item</span>
+          <span style={{ width: 88, textAlign: "right" }}>Price</span>
+          <span style={{ width: 92, textAlign: "right" }}>Shared by (tap)</span>
         </div>
         <div className="items">
-          {rows.map((r) => {
+          {rows.map((r, i) => {
             if (r.kind === "item") pos++;
-            const note = r.kind === "discount" ? `follows ${pos}` : r.kind === "surcharge" ? "fee, shared in proportion" : "";
-            const knob = r.share === "payer" ? initial(me) : r.share === "split" ? "½" : initial(partnerName);
+            const sub = r.kind === "discount" ? `follows ${pos}` : r.kind === "surcharge" ? "fee, shared in proportion" : "";
             return (
               // Editing a row shows Remove under its name; it stays until another row is edited, never
               // ending on blur (Safari does not focus a clicked button, so blur cannot tell a click on
-              // Remove from leaving the row). The slider never moves, so a tap on it is never a Remove.
+              // Remove from leaving the row). The names button never moves, so a tap on it is never a Remove.
               <div key={r.key} className={`${r.kind === "item" ? "it" : "it sub"}${flash.has(r.key) ? " flash" : ""}`}>
                 <span className="pos">{r.kind === "item" ? pos : ""}</span>
                 <span className="nm">
@@ -274,7 +296,8 @@ export function Review({
                     onFocus={() => setEditing(r.key)}
                     onChange={(e) => update(r.key, { name: e.target.value })}
                   />
-                  {note && <span className="xs dim">{note}</span>}
+                  {sub && <span className="xs dim">{sub}</span>}
+                  {r.kind === "item" && <span className="xs dim num">{r.set.length > 1 ? `${formatCents(eachCents(lines, i))} each` : "all of it"}</span>}
                   {editing === r.key && (
                     <button
                       type="button"
@@ -296,9 +319,23 @@ export function Review({
                   ok={(v) => Math.abs(v) <= MAX_BILL_CENTS && (r.kind === "discount" ? v < 0 : v >= 0)}
                 />
                 {r.kind === "item" ? (
-                  <button type="button" className="s3" data-v={r.share} data-k={knob} aria-label={`${r.name || "Item"}: ${r.share === "payer" ? "yours" : r.share === "split" ? "split equally" : `${partnerName}'s`}`} onClick={(e) => slide(e, r)} />
+                  <PeoplePicker
+                    chip
+                    label={`Who had ${r.name.trim() || "item"}`}
+                    text={setLabel(r.set, on, meId)}
+                    title={`Who had ${r.name.trim() || "this item"}?`}
+                    options={options}
+                    selected={r.set}
+                    onChange={(set) => {
+                      setUndo(null);
+                      update(r.key, { set });
+                    }}
+                    everyone
+                  />
                 ) : (
-                  <span className="s3 none" />
+                  <span className="who none" aria-hidden="true">
+                    Everyone
+                  </span>
                 )}
               </div>
             );
@@ -309,10 +346,22 @@ export function Review({
         </button>
       </div>
       <div className="foot">
-        <div className="owebar">
-          <div>
-            <div className="xs dim">{partnerName} owes you</div>
-            <div className="amt owed num">{formatCents(owes)}</div>
+        <div className="owebar m3">
+          <div style={{ minWidth: 0 }}>
+            <div className="xs dim">{foot.who}</div>
+            <div className={foot.cents > 0 ? `amt num ${foot.owe ? "owe" : "owed"}` : "amt num dim"}>{formatCents(foot.cents)}</div>
+            <div className="fbs num">
+              {on
+                .filter((p) => p.id !== payer)
+                .map((p) => (
+                  <button key={p.id} type="button" className="fb" disabled={locked} onClick={(ev) => {
+                      infoBox.current = ev.currentTarget;
+                      setInfo(p.id);
+                    }}>
+                    {nm(p)} {formatCents(o[p.id] ?? 0)} ›
+                  </button>
+                ))}
+            </div>
           </div>
           <button
             type="button"
@@ -343,6 +392,36 @@ export function Review({
           </div>
         )}
       </div>
+      {/* Outside the footer: the panel is placed against the screen, and a sticky footer would be its frame. */}
+      {bv && (
+        <Panel anchor={infoBox} title={`${bv.head} ${formatCents(bv.total)}`} done onClose={() => setInfo(null)}>
+          <div className="row">
+            <span className="ddt">
+              {bv.head} {formatCents(bv.total)}
+            </span>
+          </div>
+          {bv.rows.map((x, i) => (
+            <div key={i} className="bd">
+              <span>
+                {x.label}
+                {x.n > 1 && <span className="dim"> ÷{x.n}</span>}
+              </span>
+              <span className="num">{formatCents(x.cents)}</span>
+            </div>
+          ))}
+          {bv.rounding && (
+            <div className="bd">
+              <span>Rounding</span>
+              <span className="num">{bv.rounding}</span>
+            </div>
+          )}
+          <div className="bd tot">
+            <span>{bv.head}</span>
+            <span className="num">{formatCents(bv.total)}</span>
+          </div>
+          {bv.not && <div className="xs dim">{bv.not}</div>}
+        </Panel>
+      )}
     </main>
   );
 }
@@ -395,11 +474,11 @@ function MoneyInput({
 // What the voice call came back with.
 function Heard({ r }: { r: VoiceResult }) {
   if (!r.ok) {
-    return <span className="xs">{r.error === "ai_paused" && r.until ? `Voice is paused until ${clock(r.until)}, use the sliders` : r.message}</span>;
+    return <span className="xs">{r.error === "ai_paused" && r.until ? `Voice is paused until ${clock(r.until)}, use the buttons` : r.message}</span>;
   }
   return (
     <>
-      <span className="dim xs">{r.changes.length || r.partner !== null ? "Heard:" : "Didn't catch any items - try again"}</span>
+      <span className="dim xs">{r.changes.length ? "Heard:" : "Didn't catch any items - try again"}</span>
       {r.transcript && <q>{r.transcript}</q>}
       {r.dropped.length > 0 && (
         <span className="xs">

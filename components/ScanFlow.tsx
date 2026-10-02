@@ -21,19 +21,21 @@ type Step =
   | { k: "failed"; img: HTMLImageElement; rect: CropRect | null; failure: ApiFailure; jpeg: Blob }
   | { k: "saved"; saved: SavedBill };
 
-function draftFrom(reading: ReceiptReading | null, photo: Blob): Draft {
+// Every item starts shared by everyone on the bill (`start`: lib/people.ts billPeople).
+function draftFrom(reading: ReceiptReading | null, photo: Blob, start: number[]): Draft {
   const base = { scan_id: uuid(), photo, ai: reading };
-  if (!reading) return { ...base, description: "", date: today(), total_cents: null, rows: [{ key: 0, name: "", price_cents: 0, kind: "item", share: "payer" }] };
+  if (!reading) return { ...base, description: "", date: today(), total_cents: null, rows: [{ key: 0, name: "", price_cents: 0, kind: "item", set: start }] };
   return {
     ...base,
     description: reading.store_name ?? "",
     date: reading.date ?? today(),
     total_cents: reading.total_cents,
-    rows: reading.lines.map((l, i) => ({ key: i, name: l.name, price_cents: l.price_cents, kind: l.kind, share: "payer" })),
+    rows: reading.lines.map((l, i) => ({ key: i, name: l.name, price_cents: l.price_cents, kind: l.kind, set: start })),
   };
 }
 
-export function ScanFlow({ me, meId, partners }: { me: string; meId: number; partners: Partner[] }) {
+// `people`: everyone, you first then by id; `start`: who a new bill starts with.
+export function ScanFlow({ meId, people, start }: { meId: number; people: Partner[]; start: number[] }) {
   const router = useRouter();
   const [step, setStep] = useState<Step>({ k: "pick" });
   const camera = useRef<HTMLInputElement>(null);
@@ -60,7 +62,7 @@ export function ScanFlow({ me, meId, partners }: { me: string; meId: number; par
     const r = await postReceipt(jpeg);
     if (mine !== run.current) return;
     if (!r.ok && r.error === "signed_out") return router.replace("/signin");
-    setStep(r.ok ? { k: "review", draft: draftFrom(r.reading, jpeg) } : { k: "failed", img, rect, failure: r, jpeg });
+    setStep(r.ok ? { k: "review", draft: draftFrom(r.reading, jpeg, start) } : { k: "failed", img, rect, failure: r, jpeg });
   };
 
   if (step.k === "crop") return <ImageCropper img={step.img} onCancel={() => setStep({ k: "pick" })} onConfirm={(rect) => read(step.img, rect)} />;
@@ -76,7 +78,7 @@ export function ScanFlow({ me, meId, partners }: { me: string; meId: number; par
     );
   }
   if (step.k === "review") {
-    return <Review me={me} meId={meId} partners={partners} draft={step.draft} onBack={() => setStep({ k: "pick" })} onSaved={(saved) => setStep({ k: "saved", saved })} />;
+    return <Review meId={meId} people={people} start={start} draft={step.draft} onBack={() => setStep({ k: "pick" })} onSaved={(saved) => setStep({ k: "saved", saved })} />;
   }
   if (step.k === "saved") return <Saved s={step.saved} again={() => setStep({ k: "pick" })} done={() => router.push("/")} />;
   if (step.k === "failed") {
@@ -85,7 +87,7 @@ export function ScanFlow({ me, meId, partners }: { me: string; meId: number; par
         failure={step.failure}
         recrop={() => setStep({ k: "crop", img: step.img })}
         retry={() => read(step.img, step.rect)}
-        byHand={() => setStep({ k: "review", draft: draftFrom(null, step.jpeg) })}
+        byHand={() => setStep({ k: "review", draft: draftFrom(null, step.jpeg, start) })}
         back={() => setStep({ k: "pick" })}
       />
     );

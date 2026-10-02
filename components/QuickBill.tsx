@@ -8,7 +8,8 @@ import { useState, useSyncExternalStore } from "react";
 import { PeoplePicker } from "@/components/PeoplePicker";
 import type { Partner, SavedBill } from "@/components/Review";
 import { Saved } from "@/components/Saved";
-import { postBill, saveFailure, today, uuid } from "@/lib/api";
+import { useSave } from "@/components/useSave";
+import { today, uuid } from "@/lib/api";
 import { MAX_BILL_CENTS } from "@/lib/bill";
 import { typedFoot, typedHint } from "@/lib/billview";
 import { formatCents, parseCents } from "@/lib/money";
@@ -48,9 +49,9 @@ export function QuickBill({ meId, people, start }: { meId: number; people: Partn
   const [onBill, setOnBill] = useState(start);
   const [payer, setPayer] = useState(meId);
   const [split, setSplit] = useState(start); // Shared by
-  const [saving, setSaving] = useState(false);
-  const [saveError, setSaveError] = useState<{ text: string; retry: boolean } | null>(null);
   const [saved, setSaved] = useState<SavedBill | null>(null);
+  const names = Object.fromEntries(people.map((p) => [p.id, p.name]));
+  const { saving, error: saveError, setError: setSaveError, send } = useSave((s) => setSaved({ saved: s, names }));
 
   const on = people.filter((p) => onBill.includes(p.id));
   const nm = (p: Partner) => (p.id === meId ? "You" : firstName(p.name));
@@ -66,13 +67,11 @@ export function QuickBill({ meId, people, start }: { meId: number; people: Partn
   const locked = saving || !!saveError?.retry;
   const canSave = !saving && description.trim() !== "" && cents !== null && date !== "" && split.some((q) => q !== payer);
 
-  const save = async (id = scanId) => {
+  const save = async (id = scanId): Promise<void> => {
     if (cents === null) return;
-    setSaving(true);
-    setSaveError(null);
     remember(id);
     const name = description.trim();
-    const r = await postBill(
+    await send(
       {
         scan_id: id,
         people: onBill,
@@ -87,27 +86,30 @@ export function QuickBill({ meId, people, start }: { meId: number; people: Partn
         total_edited: false,
       },
       null,
+      {
+        lines: false,
+        first: (r) => {
+          // An answer settles the id. A conflict means it is someone else's (left by whoever used this
+          // phone before): nothing was saved, so this bill goes again under its own. Any other refusal
+          // comes before the save and leaves the id's outcome open, so it is kept.
+          if (!r.ok && r.error === "conflict") {
+            remember(null);
+            const fresh = uuid();
+            setScanId(fresh);
+            void save(fresh);
+            return true;
+          }
+          if (r.ok) remember(null);
+          if (r.ok && r.duplicate && !r.same) {
+            // An earlier, different bill held the id: that one is saved, this one is not yet.
+            setScanId(uuid());
+            setSaveError({ text: `Your earlier bill "${r.description}" ${formatCents(r.total_cents)} was saved. This one isn't yet - tap Save.`, retry: false });
+            return true;
+          }
+          if (!r.ok && r.retryable) setPicked(date); // Retry sends exactly this, even after midnight
+        },
+      },
     );
-    setSaving(false);
-    // An answer settles the id. A conflict means it is someone else's (left by whoever used this
-    // phone before): nothing was saved, so this bill goes again under its own. Any other refusal
-    // comes before the save and leaves the id's outcome open, so it is kept.
-    if (!r.ok && r.error === "conflict") {
-      remember(null);
-      const fresh = uuid();
-      setScanId(fresh);
-      return save(fresh);
-    }
-    if (r.ok) remember(null);
-    if (r.ok && r.duplicate && !r.same) {
-      // An earlier, different bill held the id: that one is saved, this one is not yet.
-      setScanId(uuid());
-      return setSaveError({ text: `Your earlier bill "${r.description}" ${formatCents(r.total_cents)} was saved. This one isn't yet - tap Save.`, retry: false });
-    }
-    if (r.ok) return setSaved({ saved: r, names: Object.fromEntries(people.map((p) => [p.id, p.name])) });
-    if (r.error === "signed_out") return router.replace("/signin");
-    if (r.retryable) setPicked(date); // Retry sends exactly this, even after midnight
-    setSaveError(saveFailure(r, false));
   };
 
   if (saved) {

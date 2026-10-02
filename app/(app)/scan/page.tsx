@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import { ScanFlow } from "@/components/ScanFlow";
-import { query } from "@/lib/db";
+import { billPeople } from "@/lib/people";
 import { currentPerson } from "@/lib/session";
 
 export const metadata = { title: "Scan a bill - Halves" };
@@ -10,6 +10,6 @@ export default async function ScanPage() {
   // on the layout's redirect having happened first.
   const me = await currentPerson();
   if (!me) redirect("/signin");
-  const partners = await query<{ id: number; name: string }>("select id::int as id, name from person where id <> $1 order by id", [me.id]);
-  return <ScanFlow me={me.name} meId={me.id} partners={partners} />;
+  const { all, start } = await billPeople(me.id);
+  return <ScanFlow meId={me.id} people={all} start={start} />;
 }

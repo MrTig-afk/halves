@@ -1,8 +1,9 @@
-// What the no-receipt form and the Saved screen say, worked out from the numbers. Pure, so the
+// What the no-receipt form, the review's breakdown and the Saved screen say, worked out from the numbers. Pure, so the
 // branches (who paid, how many people, a $0 share) are tested, not just looked at.
 import type { Saved } from "./bill";
 import { formatCents } from "./money";
 import { firstName, listNames } from "./names";
+import { breakdown, type Share, type SplitLine } from "./split";
 
 type Person = { id: number; name: string };
 
@@ -61,4 +62,33 @@ export function savedView(s: Saved, names: Record<number, string>): SavedView {
     rows: s.tabs.filter((t) => two || owed(t.person_id) > 0).map((t) => row(t.person_id, t.was, t.was + owed(t.person_id))),
     notified,
   };
+}
+
+// The panel under a person's button on the review (Artifact B5c/B5d breakdown()): their part of each
+// item they had, their share of the fee, a Rounding line only when not 0, and the items that were not theirs.
+export type BreakdownView = { head: string; total: number; rows: { label: string; n: number; cents: number }[]; rounding: string | null; not: string | null };
+export function breakdownView(lines: (SplitLine & { name: string })[], on: Person[], payer: number, receiptTotalCents: number | null, q: number, me: number): BreakdownView {
+  const ids = on.map((p) => p.id);
+  const nm = (id: number) => (id === me ? "You" : firstName(on.find((p) => p.id === id)?.name ?? ""));
+  const b = breakdown(lines, ids, payer, receiptTotalCents, q);
+  const head = payer === me ? `${nm(q)} owes you` : q === me ? `You owe ${nm(payer)}` : `${nm(q)} owes ${nm(payer)}`;
+  const called = (i: number) => lines[i].name.trim() || "Item";
+  const rows = b.parts.map((x) => ({ label: called(x.line) + (lines[x.line + 1]?.kind === "discount" ? ", less discount" : ""), n: x.n, cents: x.cents }));
+  if (b.fee !== null) rows.push({ label: `Card fee, ${q === me ? "your" : `${nm(q)}'s`} share`, n: 1, cents: b.fee });
+  const not = lines.filter((l) => l.kind === "item" && !l.people?.includes(q)).map((l) => l.name.trim() || "Item");
+  return {
+    head,
+    total: b.total,
+    rows,
+    rounding: b.rounding ? `${b.rounding > 0 ? "+" : "-"}${formatCents(Math.abs(b.rounding))}` : null,
+    not: not.length ? `Not ${q === me ? "yours" : `${nm(q)}'s`}: ${not.join(", ")}.` : null,
+  };
+}
+
+// Transitional, until T8: the voice reply still says "mine / split / partner". "partner" has an
+// answer only on a bill of exactly two; null: skip that change.
+export function voiceSet(share: Share, on: number[], me: number): number[] | null {
+  if (share === "split") return on.slice();
+  if (share === "payer") return [me];
+  return on.length === 2 ? on.filter((p) => p !== me) : null;
 }
