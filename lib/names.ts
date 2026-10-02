@@ -21,3 +21,21 @@ export const shortDate = (date: string) => {
 // A moment (timestamptz text) as a calendar date on the roommates' clock.
 export const localDate = (moment: string) => new Date(moment).toLocaleDateString("en-CA", { timeZone: TZ });
 export const isToday = (moment: string, now = new Date()) => localDate(moment) === now.toLocaleDateString("en-CA", { timeZone: TZ });
+
+// "29 Sep, 6:02 pm": when a date or total was changed, on the roommates' clock. Built from parts,
+// not en-AU, whose short September is "Sept".
+export const editedAt = (moment: string): string => {
+  const p: Record<string, string> = {};
+  for (const x of new Intl.DateTimeFormat("en-US", { timeZone: TZ, day: "numeric", month: "numeric", hour: "numeric", minute: "2-digit", hour12: true }).formatToParts(new Date(moment))) p[x.type] = x.value;
+  return `${p.day} ${MONTHS[Number(p.month) - 1]}, ${p.hour}:${p.minute} ${p.dayPeriod.toLowerCase()}`;
+};
+
+// Who had an item, in the viewer's words (2.6 order: the viewer first, then the people as given,
+// which is id order). null: a discount or surcharge has no label.
+export function itemLabel(set: number[] | null, people: { id: number; name: string }[], me: number): string | null {
+  if (!set?.length) return null;
+  if (people.every((p) => set.includes(p.id))) return "everyone";
+  const who = people.filter((p) => set.includes(p.id)).sort((a, b) => Number(b.id === me) - Number(a.id === me));
+  if (who.length === 1) return who[0].id === me ? "yours" : `${firstName(who[0].name)}'s`;
+  return who.map((p) => (p.id === me ? "You" : firstName(p.name))).join(", ");
+}

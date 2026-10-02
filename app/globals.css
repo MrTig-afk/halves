@@ -478,6 +478,29 @@ button {
 .plain.b {
   font-weight: 700;
 }
+/* Bill view: every item the viewer pays part of is tinted across the whole line, in the same orange as "You owe" */
+.li.you {
+  background: var(--orange-tint);
+  margin: 0 -14px;
+  padding: 8px 14px;
+  border-bottom-color: var(--bg);
+}
+.li .part {
+  font-size: 10px;
+  color: var(--orange);
+  font-weight: 700;
+}
+.edited {
+  display: inline-block;
+  white-space: nowrap;
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--amber);
+  background: var(--amber-tint);
+  border-radius: 999px;
+  padding: 1px 6px;
+  margin-left: 4px;
+}
 .amount-in {
   font-size: 22px;
 }
@@ -697,7 +720,7 @@ input.plain[type="date"] {
 }
 .soft {
   align-self: stretch;
-  background: var(--green-tint);
+  background: var(--soft); /* the Artifact's grey --a-soft */
   border-radius: 12px;
   padding: 10px 12px;
 }
