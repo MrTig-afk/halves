@@ -69,7 +69,7 @@ export default async function BillPage({ params, searchParams }: { params: Promi
             );
           })}
         </div>
-        {b.typed && iPaid && !settled && <div className="soft xs dim">Added without a receipt.</div>}
+        {b.typed && <div className="soft xs dim">Added without a receipt.</div>}
         {settled ? (
           <div className="soft xs dim">Settled with the round of {settled}.</div>
         ) : (

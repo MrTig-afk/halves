@@ -1,3 +1,4 @@
+import sharp from "sharp";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const { currentPerson, query, notifyLater, hasPush } = vi.hoisted(() => ({
@@ -48,7 +49,7 @@ describe("POST /api/bill", () => {
     query.mockResolvedValueOnce([{ id: 5, photo_state: "none", was: 500 }]);
     const r = await json(await post({ ...bill, partner_owes_cents: 1 }));
     // split 600 -> 300, partner's 400 -> 400; no fees; the tab before it comes from the same statement
-    expect(r).toMatchObject({ status: 200, duplicate: false, owes: 700, was: 500, photo: "none", partner_id: 2, description: "Coles" });
+    expect(r).toMatchObject({ status: 200, duplicate: false, owes: 700, was: 500, photo: "none", partner_id: 2, description: "Coles", total_cents: 1000, date: "2026-09-29" });
     expect(query).toHaveBeenCalledOnce();
     const params = query.mock.calls[0][1];
     expect(params.slice(0, 8)).toEqual([bill.scan_id, 1, 2, "Coles", "2026-09-29", 1000, 1000, 700]);
@@ -62,6 +63,22 @@ describe("POST /api/bill", () => {
     expect(query.mock.calls[0][1][12]).toBe(true);
   });
 
+  it("keeps no photo on a bill added without a receipt, even when one is sent", async () => {
+    const jpeg = await sharp({ create: { width: 300, height: 400, channels: 3, background: "#fff" } }).jpeg().toBuffer();
+    const withPhoto = (b: unknown) => {
+      const form = new FormData();
+      form.append("bill", JSON.stringify(b));
+      form.append("photo", new Blob([new Uint8Array(jpeg)], { type: "image/jpeg" }));
+      return POST(new Request("http://x/api/bill", { method: "POST", body: form }));
+    };
+    query.mockResolvedValueOnce([{ id: 5, photo_state: "kept", was: 0 }]).mockResolvedValueOnce([{ id: 6, photo_state: "none", was: 0 }]);
+    await withPhoto(bill);
+    expect(query.mock.calls[0][1][9]).toMatch(/^\/9j\//); // positive control: a scanned bill keeps it (base64 JPEG)
+    const typed = { ...bill, scan_id: "8f14e45f-ceea-467a-9a36-2b1c2f6c1a02", typed: true, total_cents: 2401, lines: [{ name: "Coles", price_cents: 2401, kind: "item", share: "split" }] };
+    await withPhoto(typed);
+    expect(query.mock.calls[1][1][9]).toBeNull();
+  });
+
   it("tells the partner, with no amount or item in the message, and says so when they get notifications", async () => {
     query.mockResolvedValueOnce([{ id: 5, photo_state: "none", was: 500 }]);
     expect(await json(await post(bill))).toMatchObject({ notified: true });
@@ -71,13 +88,27 @@ describe("POST /api/bill", () => {
     expect(await json(await post(bill))).toMatchObject({ notified: false });
   });
 
+  it("says a retried save is the same bill when nothing differs", async () => {
+    query
+      .mockRejectedValueOnce(Object.assign(new Error("duplicate key"), { code: "23505", constraint: "scan_request_pkey" }))
+      .mockResolvedValueOnce([{ partner_id: 2, owes: 700, description: "Coles", total_cents: 1000, date: "2026-09-29", photo: "none" }])
+      .mockResolvedValueOnce([{ partner_id: 2, partner: "P", balance: 700, open: 1 }]);
+    expect(await json(await post(bill))).toMatchObject({ status: 200, duplicate: true, same: true });
+    query.mockReset();
+    query
+      .mockRejectedValueOnce(Object.assign(new Error("duplicate key"), { code: "23505", constraint: "scan_request_pkey" }))
+      .mockResolvedValueOnce([{ partner_id: 2, owes: 700, description: "Coles", total_cents: 1000, date: "2026-09-22", photo: "none" }])
+      .mockResolvedValueOnce([{ partner_id: 2, partner: "P", balance: 700, open: 1 }]);
+    expect(await json(await post(bill))).toMatchObject({ duplicate: true, same: false }); // last week's: another bill
+  });
+
   it("answers a retried save with the bill stored the first time, not the retry's edits", async () => {
     query
       .mockRejectedValueOnce(Object.assign(new Error("duplicate key"), { code: "23505", constraint: "scan_request_pkey" }))
-      .mockResolvedValueOnce([{ partner_id: 3, owes: 450, description: "First try", photo: "not_kept_full" }])
+      .mockResolvedValueOnce([{ partner_id: 3, owes: 450, description: "First try", total_cents: 900, date: "2026-09-28", photo: "not_kept_full" }])
       .mockResolvedValueOnce([{ partner_id: 3, partner: "P", balance: 900, open: 2 }]);
     const r = await json(await post(bill)); // this retry says partner 2 / owes 700
-    expect(r).toMatchObject({ status: 200, duplicate: true, partner_id: 3, owes: 450, description: "First try", was: 450, photo: "not_kept_full" });
+    expect(r).toMatchObject({ status: 200, duplicate: true, same: false, partner_id: 3, owes: 450, description: "First try", total_cents: 900, date: "2026-09-28", was: 450, photo: "not_kept_full" });
     expect(query.mock.calls[2][1]).toEqual([1]); // the signed-in person's tabs; the stored partner's is picked
     expect(notifyLater).not.toHaveBeenCalled(); // told once, by the first save
     expect(hasPush).toHaveBeenCalledWith(3);

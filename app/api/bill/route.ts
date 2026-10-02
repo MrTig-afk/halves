@@ -49,7 +49,8 @@ const SAVE = `
 
 // The bill a scan id already saved, for this payer only.
 const STORED = `
-  select b.partner_id::int as partner_id, b.partner_owes_cents as owes, b.description, b.photo_state as photo
+  select b.partner_id::int as partner_id, b.partner_owes_cents as owes, b.description, b.total_cents,
+         to_char(b.bill_date, 'YYYY-MM-DD') as date, b.photo_state as photo
   from scan_request s join bill b on b.id = s.bill_id
   where s.scan_id = $1 and s.person_id = $2`;
 
@@ -80,7 +81,7 @@ export async function POST(req: Request) {
   if (bill.partner_id === me.id) return fail(400, "bad_bill", "Pick who this bill is with."); // before any image work
   let jpeg: Buffer | null = null;
   try {
-    if (photo instanceof Blob) jpeg = await normaliseImage(Buffer.from(await photo.arrayBuffer()));
+    if (photo instanceof Blob && !bill.typed) jpeg = await normaliseImage(Buffer.from(await photo.arrayBuffer()));
   } catch (e) {
     // The cropper's own JPEG already passed this check when it was read; a photo that fails it
     // now is left out and the bill still saves.
@@ -109,15 +110,17 @@ export async function POST(req: Request) {
     ]);
     if (r.id === null) return fail(400, "bad_bill", "Pick who this bill is with.");
     notifyLater(bill.partner_id, { title: `${firstName(me.name)} added a bill`, url: `/bill/${r.id}` });
-    saved = { duplicate: false, photo: r.photo_state, owes, partner_id: bill.partner_id, description: bill.description, was: r.was, notified: false };
+    saved = { duplicate: false, photo: r.photo_state, owes, partner_id: bill.partner_id, description: bill.description, total_cents: total, date: bill.date, same: true, was: r.was, notified: false };
   } catch (e) {
     const err = e as { code?: string; constraint?: string };
     if (err.code !== "23505" || err.constraint !== "scan_request_pkey") throw e;
-    const [stored] = await query<Omit<Saved, "duplicate" | "was" | "notified">>(STORED, [bill.scan_id, me.id]);
+    const [stored] = await query<Omit<Saved, "duplicate" | "same" | "was" | "notified">>(STORED, [bill.scan_id, me.id]);
     // A scan id used by the other person is refused.
     if (!stored) return fail(409, "conflict", "This bill couldn't be saved. Scan it again.");
     const balance = (await tabs(me.id)).find((t) => t.partner_id === stored.partner_id)?.balance ?? 0;
-    saved = { duplicate: true, ...stored, was: balance - stored.owes, notified: false };
+    // Compared here, where both bills are normalised the same way.
+    const same = stored.description === bill.description && stored.total_cents === total && stored.date === bill.date && stored.partner_id === bill.partner_id && stored.owes === owes;
+    saved = { duplicate: true, ...stored, same, was: balance - stored.owes, notified: false };
   }
   saved.notified = await (saved.partner_id === bill.partner_id ? partnerPush : hasPush(saved.partner_id));
   console.info(JSON.stringify({ event: saved.duplicate ? "bill_duplicate" : "bill_saved", lines: bill.lines.length, photo: saved.photo }));
