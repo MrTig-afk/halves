@@ -1,6 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { Figtree } from "next/font/google";
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { UpdatePrompt } from "@/components/UpdatePrompt";
 import { readTheme, THEME_COLOR, THEME_COOKIE } from "@/lib/theme";
 import "./globals.css";
@@ -37,11 +37,15 @@ export async function generateViewport(): Promise<Viewport> {
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
   const theme = readTheme((await cookies()).get(THEME_COOKIE)?.value);
+  const nonce = (await headers()).get("x-nonce") ?? undefined;
   return (
     <html lang="en-AU" className={figtree.variable} data-theme={theme === "system" ? undefined : theme}>
       <head>
         {/* Chrome's install prompt can arrive before any app code runs: keep it for the Home card. */}
+        {/* The browser hides a nonce attribute once the page loads, so hydration must not compare it. */}
         <script
+          nonce={nonce}
+          suppressHydrationWarning
           dangerouslySetInnerHTML={{ __html: 'addEventListener("beforeinstallprompt",function(e){e.preventDefault();window.__bip=e})' }}
         />
       </head>

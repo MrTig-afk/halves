@@ -13,9 +13,11 @@ const nextConfig: NextConfig = {
         headers: [
           { key: "X-Content-Type-Options", value: "nosniff" },
           { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
-          { key: "Content-Security-Policy", value: "frame-ancestors 'none'" },
           // Camera and microphone are needed for scanning and voice; nothing else.
           { key: "Permissions-Policy", value: "camera=(self), microphone=(self), geolocation=()" },
+          { key: "Strict-Transport-Security", value: "max-age=63072000" },
+          // No framing on any path, including the ones the proxy's policy skips (build files, a 404).
+          { key: "X-Frame-Options", value: "DENY" },
         ],
       },
     ];
